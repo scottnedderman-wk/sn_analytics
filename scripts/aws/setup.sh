@@ -131,14 +131,13 @@ if [[ -z "$attached_ssm" || "$attached_ssm" == "None" ]]; then
     --policy-arn "$SSM_POLICY_ARN"
 fi
 
-CREATED_INSTANCE_PROFILE="false"
 if ! aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE_NAME" >/dev/null 2>&1; then
   aws iam create-instance-profile \
     --instance-profile-name "$INSTANCE_PROFILE_NAME" \
     --tags $(iam_tags) >/dev/null
-  CREATED_INSTANCE_PROFILE="true"
 fi
 
+ADDED_ROLE_TO_PROFILE="false"
 profile_role="$(aws iam get-instance-profile \
   --instance-profile-name "$INSTANCE_PROFILE_NAME" \
   --query "InstanceProfile.Roles[?RoleName==\`${ROLE_NAME}\`].RoleName" \
@@ -147,9 +146,10 @@ if [[ -z "$profile_role" || "$profile_role" == "None" ]]; then
   aws iam add-role-to-instance-profile \
     --instance-profile-name "$INSTANCE_PROFILE_NAME" \
     --role-name "$ROLE_NAME"
+  ADDED_ROLE_TO_PROFILE="true"
 fi
 
-if [[ "$CREATED_INSTANCE_PROFILE" == "true" ]]; then
+if [[ "$ADDED_ROLE_TO_PROFILE" == "true" ]]; then
   echo "waiting 15s for instance profile to propagate..."
   sleep 15
 fi
