@@ -1,0 +1,17 @@
+[Unit]
+Description=sn-analytics
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sn-analytics
+Environment=NODE_ENV=production
+Environment=PORT=80
+Environment=SQLITE_PATH=/data/app.sqlite
+ExecStart=/usr/local/bin/bun run start
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
