@@ -22,7 +22,7 @@ HTTP is port 80 from RFC1918 only. SQLite lives on a 20 GB gp3 volume mounted at
 ./scripts/aws/setup.sh
 ```
 
-Creates a `t3.small` Amazon Linux 2023 instance in `us-east-2b`, a 20 GB data volume, security group `sn-analytics-http`, and IAM role `sn-analytics-ec2` (SSM). No public IP. IDs are stored in `infra/.instance` (gitignored).
+Creates a `t3.small` Amazon Linux 2023 instance in `us-east-2b`, a 20 GB data volume, security group `sn-analytics-http`, and IAM role `sn-analytics-ec2` (SSM). No public IP. IDs are stored in `infra/.instance` (gitignored). Setup waits until SSM is Online and user-data has finished (Bun in `/usr/local/bin` and `/data` mounted) before printing the next-step commands.
 
 If SSM never comes online (typical when the subnet has no NAT and no SSM VPC endpoints):
 
@@ -88,3 +88,21 @@ Type `sn-analytics` to confirm. This **deletes the EBS volume** (SQLite is gone)
 | `SQLITE_PATH=/data/app.sqlite` | systemd |
 
 Locally, the app uses `PORT=3000` and `./data/app.sqlite` unless you override those env vars.
+
+## Troubleshooting
+
+If setup or deploy fails after SSM is Online, open a shell and watch first-boot logs:
+
+```bash
+# shellcheck disable=SC1091
+source infra/.instance
+aws ssm start-session --target "$INSTANCE_ID" --region us-east-2
+```
+
+Then on the instance:
+
+```bash
+sudo tail -f /var/log/cloud-init-output.log
+```
+
+User-data installs Bun and mounts `/data`. Setup now waits for both before you should run `./scripts/aws/deploy.sh`.

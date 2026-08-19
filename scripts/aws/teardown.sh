@@ -27,6 +27,8 @@ if [[ -n "${INSTANCE_ID}" && "$INSTANCE_ID" != "None" ]]; then
 fi
 
 if [[ -n "${VOLUME_ID}" && "$VOLUME_ID" != "None" ]]; then
+  echo "waiting for volume to become available..."
+  aws ec2 wait volume-available --volume-ids "$VOLUME_ID"
   aws ec2 delete-volume --volume-id "$VOLUME_ID"
 fi
 

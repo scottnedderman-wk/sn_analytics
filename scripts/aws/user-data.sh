@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-dnf install -y rsync unzip tar gzip curl xfsprogs
+dnf install -y rsync unzip xfsprogs
 
 find_data_device() {
   local root_src
@@ -38,11 +38,11 @@ if ! grep -q "UUID=${UUID}" /etc/fstab; then
   echo "UUID=${UUID} /data xfs defaults,nofail 0 2" >>/etc/fstab
 fi
 mount -a
+mountpoint -q /data || { echo "user-data: /data is not a mount" >&2; exit 1; }
 chmod 755 /data
 
+export BUN_INSTALL=/usr/local
 curl -fsSL https://bun.sh/install | bash
-cp /root/.bun/bin/bun /usr/local/bin/bun
-chmod 755 /usr/local/bin/bun
 
 mkdir -p /opt/sn-analytics
 chown ec2-user:ec2-user /opt/sn-analytics

@@ -154,6 +154,9 @@ if [[ "$ADDED_ROLE_TO_PROFILE" == "true" ]]; then
   sleep 15
 fi
 
+INSTANCE_ID=""
+PRIVATE_IP=""
+
 VOLUME_ID="$(aws ec2 create-volume \
   --availability-zone "$AZ" \
   --size "$VOLUME_SIZE_GB" \
@@ -161,6 +164,7 @@ VOLUME_ID="$(aws ec2 create-volume \
   --tag-specifications "$(tag_spec volume)" \
   --query 'VolumeId' \
   --output text)"
+write_state
 aws ec2 wait volume-available --volume-ids "$VOLUME_ID"
 
 INSTANCE_ID="$(aws ec2 run-instances \
@@ -173,6 +177,7 @@ INSTANCE_ID="$(aws ec2 run-instances \
   --network-interfaces "AssociatePublicIpAddress=${ASSOCIATE_PUBLIC_IP},DeviceIndex=0,SubnetId=${SUBNET_ID},Groups=${SG_ID}" \
   --query 'Instances[0].InstanceId' \
   --output text)"
+write_state
 aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
 
 PRIVATE_IP="$(aws ec2 describe-instances \
@@ -197,6 +202,42 @@ until ssm_online "$INSTANCE_ID"; do
   fi
   sleep 5
   elapsed=$((elapsed + 5))
+done
+
+userdata_ready() {
+  local cmd_id status
+  cmd_id="$(aws ssm send-command \
+    --instance-ids "$INSTANCE_ID" \
+    --document-name AWS-RunShellScript \
+    --comment "wait-userdata" \
+    --timeout-seconds 30 \
+    --parameters commands='["test -x /usr/local/bin/bun && mountpoint -q /data"]' \
+    --query Command.CommandId \
+    --output text 2>/dev/null)" || return 1
+  [[ -n "$cmd_id" && "$cmd_id" != "None" ]] || return 1
+  for _ in $(seq 1 20); do
+    status="$(aws ssm get-command-invocation \
+      --command-id "$cmd_id" \
+      --instance-id "$INSTANCE_ID" \
+      --query Status \
+      --output text 2>/dev/null || true)"
+    case "$status" in
+      Success) return 0 ;;
+      Failed|Cancelled|TimedOut|Cancelling) return 1 ;;
+    esac
+    sleep 2
+  done
+  return 1
+}
+
+echo "waiting up to 5 minutes for user-data (Bun + /data)..."
+elapsed=0
+until userdata_ready; do
+  if ((elapsed >= 300)); then
+    die "user-data did not finish (Bun + /data) within 5 minutes for ${INSTANCE_ID}. Check /var/log/cloud-init-output.log via: aws ssm start-session --target ${INSTANCE_ID} --region ${AWS_DEFAULT_REGION}"
+  fi
+  sleep 10
+  elapsed=$((elapsed + 10))
 done
 
 cat <<EOF

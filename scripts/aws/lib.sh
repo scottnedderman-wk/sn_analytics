@@ -3,7 +3,8 @@
 
 set -euo pipefail
 
-export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-2}"
+export AWS_DEFAULT_REGION=us-east-2
+export AWS_REGION=us-east-2
 AZ="us-east-2b"
 SG_NAME="sn-analytics-http"
 ROLE_NAME="sn-analytics-ec2"
