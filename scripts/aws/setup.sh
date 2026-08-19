@@ -54,32 +54,102 @@ if [[ -z "$SG_ID" || "$SG_ID" == "None" ]]; then
     --tag-specifications "$(tag_spec security-group)" \
     --query 'GroupId' \
     --output text)"
-  for cidr in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
-    aws ec2 authorize-security-group-ingress \
-      --group-id "$SG_ID" \
-      --protocol tcp \
-      --port 80 \
-      --cidr "$cidr" >/dev/null
-  done
 fi
+
+for cidr in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
+  auth_err="$(aws ec2 authorize-security-group-ingress \
+    --group-id "$SG_ID" \
+    --protocol tcp \
+    --port 80 \
+    --cidr "$cidr" 2>&1)" && continue
+  if [[ "$auth_err" != *"InvalidPermission.Duplicate"* ]]; then
+    die "failed to authorize tcp/80 from ${cidr} on ${SG_NAME}: ${auth_err}"
+  fi
+done
+
+bad_perms="$(aws ec2 describe-security-groups \
+  --group-ids "$SG_ID" \
+  --query "length(SecurityGroups[0].IpPermissions[?(IpProtocol != 'tcp') || (FromPort != \`80\`) || (ToPort != \`80\`)])" \
+  --output text)"
+if [[ "$bad_perms" != "0" ]]; then
+  die "security group ${SG_NAME} has inbound rules other than tcp/80; fix or delete it and retry"
+fi
+
+sg_pairs="$(aws ec2 describe-security-groups \
+  --group-ids "$SG_ID" \
+  --query "SecurityGroups[0].IpPermissions[].UserIdGroupPairs[]" \
+  --output text)"
+if [[ -n "$sg_pairs" && "$sg_pairs" != "None" ]]; then
+  die "security group ${SG_NAME} has inbound rules other than tcp/80 from RFC1918; fix or delete it and retry"
+fi
+
+sg_prefix="$(aws ec2 describe-security-groups \
+  --group-ids "$SG_ID" \
+  --query "SecurityGroups[0].IpPermissions[].PrefixListIds[]" \
+  --output text)"
+if [[ -n "$sg_prefix" && "$sg_prefix" != "None" ]]; then
+  die "security group ${SG_NAME} has inbound rules other than tcp/80 from RFC1918; fix or delete it and retry"
+fi
+
+sg_v6="$(aws ec2 describe-security-groups \
+  --group-ids "$SG_ID" \
+  --query "SecurityGroups[0].IpPermissions[].Ipv6Ranges[]" \
+  --output text)"
+if [[ -n "$sg_v6" && "$sg_v6" != "None" ]]; then
+  die "security group ${SG_NAME} has inbound rules other than tcp/80 from RFC1918; fix or delete it and retry"
+fi
+
+sg_cidrs="$(aws ec2 describe-security-groups \
+  --group-ids "$SG_ID" \
+  --query "SecurityGroups[0].IpPermissions[].IpRanges[].CidrIp" \
+  --output text)"
+for cidr in $sg_cidrs; do
+  case "$cidr" in
+    10.0.0.0/8|172.16.0.0/12|192.168.0.0/16) ;;
+    *)
+      die "security group ${SG_NAME} has unexpected inbound CIDR ${cidr}; fix or delete it and retry"
+      ;;
+  esac
+done
+
+SSM_POLICY_ARN="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 
 if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
   aws iam create-role \
     --role-name "$ROLE_NAME" \
     --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
     --tags $(iam_tags) >/dev/null
-  aws iam attach-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 fi
 
+attached_ssm="$(aws iam list-attached-role-policies \
+  --role-name "$ROLE_NAME" \
+  --query "AttachedPolicies[?PolicyArn==\`${SSM_POLICY_ARN}\`].PolicyArn" \
+  --output text)"
+if [[ -z "$attached_ssm" || "$attached_ssm" == "None" ]]; then
+  aws iam attach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn "$SSM_POLICY_ARN"
+fi
+
+CREATED_INSTANCE_PROFILE="false"
 if ! aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE_NAME" >/dev/null 2>&1; then
   aws iam create-instance-profile \
     --instance-profile-name "$INSTANCE_PROFILE_NAME" \
     --tags $(iam_tags) >/dev/null
+  CREATED_INSTANCE_PROFILE="true"
+fi
+
+profile_role="$(aws iam get-instance-profile \
+  --instance-profile-name "$INSTANCE_PROFILE_NAME" \
+  --query "InstanceProfile.Roles[?RoleName==\`${ROLE_NAME}\`].RoleName" \
+  --output text)"
+if [[ -z "$profile_role" || "$profile_role" == "None" ]]; then
   aws iam add-role-to-instance-profile \
     --instance-profile-name "$INSTANCE_PROFILE_NAME" \
     --role-name "$ROLE_NAME"
+fi
+
+if [[ "$CREATED_INSTANCE_PROFILE" == "true" ]]; then
   echo "waiting 15s for instance profile to propagate..."
   sleep 15
 fi
@@ -105,18 +175,19 @@ INSTANCE_ID="$(aws ec2 run-instances \
   --output text)"
 aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
 
-aws ec2 attach-volume \
-  --volume-id "$VOLUME_ID" \
-  --instance-id "$INSTANCE_ID" \
-  --device /dev/sdf >/dev/null
-aws ec2 wait volume-in-use --volume-ids "$VOLUME_ID"
-
 PRIVATE_IP="$(aws ec2 describe-instances \
   --instance-ids "$INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].PrivateIpAddress' \
   --output text)"
 
+aws ec2 attach-volume \
+  --volume-id "$VOLUME_ID" \
+  --instance-id "$INSTANCE_ID" \
+  --device /dev/sdf >/dev/null
+
 write_state
+
+aws ec2 wait volume-in-use --volume-ids "$VOLUME_ID"
 
 echo "waiting up to 5 minutes for SSM..."
 elapsed=0
