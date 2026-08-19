@@ -1,7 +1,12 @@
 import { serve } from "bun";
 import index from "./index.html";
+import { openAppDatabase, sqlitePathFromEnv } from "./db";
+import { listenPort } from "./port";
+
+openAppDatabase(sqlitePathFromEnv());
 
 const server = serve({
+  port: listenPort(),
   routes: {
     // Serve index.html for all unmatched routes.
     "/*": index,
