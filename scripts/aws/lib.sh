@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Shared helpers for setup/deploy/teardown. Source this file; do not execute it.
 
+set -euo pipefail
+
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-2}"
 AZ="us-east-2b"
 SG_NAME="sn-analytics-http"
@@ -89,10 +91,12 @@ has_managed_by_tag() {
 ssm_online() {
   local id="$1"
   local status
-  status="$(aws ssm describe-instance-information \
+  if ! status="$(aws ssm describe-instance-information \
     --filters "Key=InstanceIds,Values=${id}" \
     --query 'InstanceInformationList[0].PingStatus' \
-    --output text 2>/dev/null || true)"
+    --output text 2>/dev/null)"; then
+    return 1
+  fi
   [[ "$status" == "Online" ]]
 }
 
