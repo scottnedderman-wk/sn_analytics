@@ -122,3 +122,42 @@ export async function executeStatement(
   });
   return statementResult(res, creds, deps);
 }
+
+export const SESSION_SQL =
+  "SELECT CURRENT_USER() AS current_user, CURRENT_ROLE() AS current_role, CURRENT_WAREHOUSE() AS current_warehouse";
+
+export const EVENT_COUNTS_SQL = `SELECT source_event_type, COUNT(*) AS event_count
+FROM gold_prod.marts.fct_amplitude_events
+WHERE event_date BETWEEN DATEADD(day, -7, CURRENT_DATE()) AND CURRENT_DATE()
+  AND is_amplitude_generated_event = FALSE
+GROUP BY source_event_type
+ORDER BY event_count DESC
+LIMIT 50`;
+
+export type SessionInfo = { user: string; role: string; warehouse: string };
+export type EventCount = { sourceEventType: string; eventCount: number };
+
+export async function sessionInfo(creds: SnowflakeCreds, deps: ExecuteDeps = {}): Promise<SessionInfo> {
+  const rows = await executeStatement(SESSION_SQL, creds, deps);
+  const row = rows[0];
+  if (!row || row[0] == null || row[1] == null || row[2] == null) {
+    throw new Error("Snowflake session query returned no row");
+  }
+  return { user: row[0], role: row[1], warehouse: row[2] };
+}
+
+export async function eventCountsLast7d(creds: SnowflakeCreds, deps: ExecuteDeps = {}): Promise<EventCount[]> {
+  const rows = await executeStatement(EVENT_COUNTS_SQL, creds, deps);
+  return rows.map((row) => ({
+    sourceEventType: row[0] ?? "",
+    eventCount: Number.parseInt(row[1] ?? "0", 10) || 0,
+  }));
+}
+
+export function formatSession(info: SessionInfo): string {
+  return `user=${info.user} role=${info.role} warehouse=${info.warehouse}`;
+}
+
+export function formatEventCounts(rows: EventCount[]): string {
+  return rows.map((r) => `${r.sourceEventType}\t${r.eventCount}`).join("\n");
+}

@@ -1,8 +1,14 @@
 import { expect, test } from "bun:test";
 import {
   credsFromEnv,
+  EVENT_COUNTS_SQL,
+  eventCountsLast7d,
   executeStatement,
+  formatEventCounts,
+  formatSession,
   parseArgs,
+  SESSION_SQL,
+  sessionInfo,
   SNOWFLAKE_ACCOUNT_URL,
   type FetchImpl,
 } from "./snowflakeEvents";
@@ -107,4 +113,50 @@ test("executeStatement times out when 202 never completes", async () => {
     }),
   ).rejects.toThrow("Snowflake statement timed out");
   expect(fetchCalls).toBe(1);
+});
+
+test("SESSION_SQL matches spec", () => {
+  expect(SESSION_SQL).toBe(
+    "SELECT CURRENT_USER() AS current_user, CURRENT_ROLE() AS current_role, CURRENT_WAREHOUSE() AS current_warehouse",
+  );
+});
+
+test("EVENT_COUNTS_SQL matches spec", () => {
+  expect(EVENT_COUNTS_SQL).toBe(
+    `SELECT source_event_type, COUNT(*) AS event_count
+FROM gold_prod.marts.fct_amplitude_events
+WHERE event_date BETWEEN DATEADD(day, -7, CURRENT_DATE()) AND CURRENT_DATE()
+  AND is_amplitude_generated_event = FALSE
+GROUP BY source_event_type
+ORDER BY event_count DESC
+LIMIT 50`,
+  );
+});
+
+test("sessionInfo maps the first row by position", async () => {
+  const fetchImpl = async () => jsonResponse(200, { data: [["SNEDDERMAN", "TECH_ANALYST", "PROD_WH"]] });
+  expect(await sessionInfo({ pat: "tok" }, { fetchImpl })).toEqual({
+    user: "SNEDDERMAN",
+    role: "TECH_ANALYST",
+    warehouse: "PROD_WH",
+  });
+});
+
+test("eventCountsLast7d parses event_count as an integer", async () => {
+  const fetchImpl = async () =>
+    jsonResponse(200, {
+      data: [
+        ["Clicked Save", "12"],
+        ["Viewed Page", "3"],
+      ],
+    });
+  expect(await eventCountsLast7d({ pat: "tok" }, { fetchImpl })).toEqual([
+    { sourceEventType: "Clicked Save", eventCount: 12 },
+    { sourceEventType: "Viewed Page", eventCount: 3 },
+  ]);
+});
+
+test("formatters match CLI output", () => {
+  expect(formatSession({ user: "U", role: "R", warehouse: "W" })).toBe("user=U role=R warehouse=W");
+  expect(formatEventCounts([{ sourceEventType: "Clicked Save", eventCount: 12 }])).toBe("Clicked Save\t12");
 });
