@@ -8,6 +8,11 @@ openAppDatabase(sqlitePathFromEnv());
 const server = serve({
   port: listenPort(),
   routes: {
+    "/data.json": () =>
+      new Response(Bun.file(new URL("./data.json", import.meta.url)), {
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      }),
+
     // Serve index.html for all unmatched routes.
     "/*": index,
 

@@ -42,3 +42,8 @@ data/
 
 # aws-cli deploy state
 infra/.instance
+
+tmp/
+
+# local git worktrees
+.worktrees/
