@@ -62,15 +62,28 @@ test("executeStatement POSTs SQL and parses data rows", async () => {
   expect(await executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).toEqual([["Clicked Save", "12"]]);
 });
 
+test("executeStatement throws when Snowflake returns multiple partitions", async () => {
+  const fetchImpl = async () =>
+    jsonResponse(200, {
+      data: [["Clicked Save", "1"]],
+      resultSetMetaData: { partitionInfo: [{}, {}] },
+    });
+  await expect(executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).rejects.toThrow(
+    "Snowflake returned 2 result partitions; pagination is not implemented",
+  );
+});
+
 test("executeStatement throws auth/permission on 401", async () => {
   const fetchImpl = async () => jsonResponse(401, { message: "invalid token" });
-  expect(executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).rejects.toThrow("401 auth/permission");
+  await expect(executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).rejects.toThrow(
+    "401 auth/permission",
+  );
 });
 
 test("executeStatement throws Snowflake message on statement failure", async () => {
   const fetchImpl = async () =>
     jsonResponse(422, { code: "001003", message: "SQL compilation error: Object does not exist" });
-  expect(executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).rejects.toThrow(
+  await expect(executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).rejects.toThrow(
     "422 SQL compilation error: Object does not exist",
   );
 });

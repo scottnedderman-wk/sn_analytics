@@ -31,7 +31,20 @@ type SnowflakeStatementResponse = {
   data?: string[][];
   message?: string;
   statementHandle?: string;
+  resultSetMetaData?: { partitionInfo?: unknown[] };
 };
+
+function assertSinglePartition(json: SnowflakeStatementResponse): void {
+  const partitions = json.resultSetMetaData?.partitionInfo?.length ?? 1;
+  if (partitions > 1) {
+    throw new Error(`Snowflake returned ${partitions} result partitions; pagination is not implemented`);
+  }
+}
+
+function statementData(json: SnowflakeStatementResponse): string[][] {
+  assertSinglePartition(json);
+  return json.data!;
+}
 
 async function readJson(res: Response): Promise<{ json: SnowflakeStatementResponse; snippet: string }> {
   const text = await res.text();
@@ -68,7 +81,7 @@ async function statementResult(
   if (!res.ok || json.data == null) {
     throwHttpError(res.status, json, snippet);
   }
-  return json.data;
+  return statementData(json);
 }
 
 async function pollStatement(handle: string, creds: SnowflakeCreds, deps: ExecuteDeps): Promise<string[][]> {
@@ -94,7 +107,7 @@ async function pollStatement(handle: string, creds: SnowflakeCreds, deps: Execut
     if (!res.ok || json.data == null) {
       throwHttpError(res.status, json, snippet);
     }
-    return json.data;
+    return statementData(json);
   }
 }
 
