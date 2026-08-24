@@ -7,7 +7,8 @@
     "dev": "bun --hot src/index.tsx",
     "start": "NODE_ENV=production bun src/index.tsx",
     "build": "bun run build.ts",
-    "snowflake-events": "bun scripts/snowflake-events.ts"
+    "snowflake-events": "bun scripts/snowflake-events.ts",
+    "amplitude-refresh-30d": "bun scripts/amplitude-refresh-30d.ts"
   },
   "dependencies": {
     "bun-plugin-tailwind": "^0.0.15",
