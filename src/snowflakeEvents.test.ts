@@ -78,6 +78,7 @@ test("executeStatement polls GET after 202 until data arrives", async () => {
     }
     const headers = new Headers(init?.headers);
     expect(headers.get("Authorization")).toBe("Bearer tok");
+    expect(headers.get("Content-Type")).toBe("application/json");
     expect(headers.get("Accept")).toBe("application/json");
     return jsonResponse(200, { data: [["user1", "TECH_ANALYST", "PROD_WH"]] });
   };
@@ -91,8 +92,12 @@ test("executeStatement polls GET after 202 until data arrives", async () => {
 
 test("executeStatement times out when 202 never completes", async () => {
   let t = 0;
-  const fetchImpl = async () => jsonResponse(202, { statementHandle: "h" });
-  expect(
+  let fetchCalls = 0;
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    return jsonResponse(202, { statementHandle: "h" });
+  };
+  await expect(
     executeStatement("SELECT 1", { pat: "tok" }, {
       fetchImpl,
       now: () => t,
@@ -101,4 +106,5 @@ test("executeStatement times out when 202 never completes", async () => {
       },
     }),
   ).rejects.toThrow("Snowflake statement timed out");
+  expect(fetchCalls).toBe(1);
 });

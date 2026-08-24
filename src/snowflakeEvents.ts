@@ -80,10 +80,12 @@ async function pollStatement(handle: string, creds: SnowflakeCreds, deps: Execut
   for (;;) {
     if (now() >= deadline) throw new Error("Snowflake statement timed out");
     await sleep(POLL_MS);
+    if (now() >= deadline) throw new Error("Snowflake statement timed out");
     const res = await fetchImpl(url, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${creds.pat}`,
+        "Content-Type": "application/json",
         Accept: "application/json",
       },
     });
