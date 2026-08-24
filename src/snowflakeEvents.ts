@@ -47,7 +47,7 @@ function throwHttpError(status: number, json: SnowflakeStatementResponse, snippe
   if (status === 401 || status === 403) {
     throw new Error(`${status} auth/permission`);
   }
-  if (json.message) throw new Error(json.message);
+  if (json.message) throw new Error(`${status} ${json.message}`);
   throw new Error(`${status} ${snippet}`);
 }
 

@@ -59,6 +59,6 @@ test("executeStatement throws Snowflake message on statement failure", async () 
   const fetchImpl = async () =>
     jsonResponse(422, { code: "001003", message: "SQL compilation error: Object does not exist" });
   expect(executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).rejects.toThrow(
-    "SQL compilation error: Object does not exist",
+    "422 SQL compilation error: Object does not exist",
   );
 });
