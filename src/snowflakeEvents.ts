@@ -51,6 +51,51 @@ function throwHttpError(status: number, json: SnowflakeStatementResponse, snippe
   throw new Error(`${status} ${snippet}`);
 }
 
+const POLL_MS = 1_000;
+const TIMEOUT_MS = 120_000;
+
+async function statementResult(
+  res: Response,
+  creds: SnowflakeCreds,
+  deps: ExecuteDeps,
+): Promise<string[][]> {
+  const { json, snippet } = await readJson(res);
+  if (res.status === 202) {
+    const handle = json.statementHandle;
+    if (!handle) throw new Error(`202 ${snippet}`);
+    return pollStatement(handle, creds, deps);
+  }
+  if (!res.ok || json.data == null) {
+    throwHttpError(res.status, json, snippet);
+  }
+  return json.data;
+}
+
+async function pollStatement(handle: string, creds: SnowflakeCreds, deps: ExecuteDeps): Promise<string[][]> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const deadline = now() + TIMEOUT_MS;
+  const url = `${STATEMENTS_URL}/${handle}`;
+  for (;;) {
+    if (now() >= deadline) throw new Error("Snowflake statement timed out");
+    await sleep(POLL_MS);
+    const res = await fetchImpl(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${creds.pat}`,
+        Accept: "application/json",
+      },
+    });
+    const { json, snippet } = await readJson(res);
+    if (res.status === 202) continue;
+    if (!res.ok || json.data == null) {
+      throwHttpError(res.status, json, snippet);
+    }
+    return json.data;
+  }
+}
+
 export async function executeStatement(
   sql: string,
   creds: SnowflakeCreds,
@@ -73,12 +118,5 @@ export async function executeStatement(
       timeout: 120,
     }),
   });
-  const { json, snippet } = await readJson(res);
-  if (res.status === 202) {
-    throw new Error("Snowflake statement timed out");
-  }
-  if (!res.ok || json.data == null) {
-    throwHttpError(res.status, json, snippet);
-  }
-  return json.data;
+  return statementResult(res, creds, deps);
 }

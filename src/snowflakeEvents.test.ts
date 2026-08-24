@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { credsFromEnv, executeStatement, parseArgs, SNOWFLAKE_ACCOUNT_URL } from "./snowflakeEvents";
+import {
+  credsFromEnv,
+  executeStatement,
+  parseArgs,
+  SNOWFLAKE_ACCOUNT_URL,
+  type FetchImpl,
+} from "./snowflakeEvents";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -61,4 +67,38 @@ test("executeStatement throws Snowflake message on statement failure", async () 
   expect(executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).rejects.toThrow(
     "422 SQL compilation error: Object does not exist",
   );
+});
+
+test("executeStatement polls GET after 202 until data arrives", async () => {
+  const calls: Array<{ url: string; method: string }> = [];
+  const fetchImpl: FetchImpl = async (input, init) => {
+    calls.push({ url: String(input), method: init?.method ?? "GET" });
+    if (calls.length === 1) {
+      return jsonResponse(202, { statementHandle: "abc-handle" });
+    }
+    const headers = new Headers(init?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer tok");
+    expect(headers.get("Accept")).toBe("application/json");
+    return jsonResponse(200, { data: [["user1", "TECH_ANALYST", "PROD_WH"]] });
+  };
+  const rows = await executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl, sleep: async () => {} });
+  expect(rows).toEqual([["user1", "TECH_ANALYST", "PROD_WH"]]);
+  expect(calls[1]).toEqual({
+    url: `${SNOWFLAKE_ACCOUNT_URL}/api/v2/statements/abc-handle`,
+    method: "GET",
+  });
+});
+
+test("executeStatement times out when 202 never completes", async () => {
+  let t = 0;
+  const fetchImpl = async () => jsonResponse(202, { statementHandle: "h" });
+  expect(
+    executeStatement("SELECT 1", { pat: "tok" }, {
+      fetchImpl,
+      now: () => t,
+      sleep: async () => {
+        t += 121_000;
+      },
+    }),
+  ).rejects.toThrow("Snowflake statement timed out");
 });
