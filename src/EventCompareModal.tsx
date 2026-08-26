@@ -77,6 +77,8 @@ export function EventCompareModal({
   onClose: () => void;
 }): JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const headingId = "event-compare-title";
   const contract = contractFor(row.eventName);
   const fields = comparableFields(row);
@@ -85,13 +87,17 @@ export function EventCompareModal({
   const subtitle = legacy.length ? legacy.join(", ") : "—";
 
   useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previous?.focus();
+    };
+  }, []);
 
   return (
     <>

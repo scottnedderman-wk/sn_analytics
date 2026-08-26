@@ -103,6 +103,7 @@ export async function refreshEventCompare(
 ): Promise<CompareRow> {
   const contract = contractFor(eventName);
   if (!contract) throw new Error(`No compare contract for ${eventName}`);
+  if (contract.repo !== repo) throw new Error(`${eventName} does not belong to ${repo}`);
 
   const clock = deps?.now ?? (() => new Date());
   const now = clock();

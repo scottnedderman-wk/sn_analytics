@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import {
   compareRowFromContract,
   contractFor,
+  contractsForRepo,
   formatScoreTitle,
   type CompareRow,
 } from "./eventCompare";
@@ -29,7 +30,7 @@ function overlayFor(cache: Record<string, CompareRow>, name: string): CompareRow
   return cache[name] ?? compareRowFromContract(name);
 }
 
-function mergeRows(prev: Record<string, CompareRow>, rows: CompareRow[]): Record<string, CompareRow> {
+export function mergeRows(prev: Record<string, CompareRow>, rows: CompareRow[]): Record<string, CompareRow> {
   const next = { ...prev };
   for (const row of rows) next[row.eventName] = row;
   return next;
@@ -48,15 +49,19 @@ function pendingCompareRow(eventName: string): CompareRow {
   );
 }
 
-function isRefreshBusy(busy: Set<string>, name: string): boolean {
+export function isRefreshBusy(busy: Set<string>, name: string): boolean {
   return busy.has("*") || busy.has(name);
+}
+
+export function isRefreshAllDisabled(repo: string, anyBusy: boolean): boolean {
+  return anyBusy || contractsForRepo(repo).length === 0;
 }
 
 function iconBtnClass(disabled: boolean): string {
   return `inline-flex items-center justify-center rounded p-1 ${disabled ? "opacity-40" : "hover:opacity-70"}`;
 }
 
-function EventRow({
+export function EventRow({
   ev,
   query,
   row,
@@ -253,11 +258,13 @@ export function AppDetail({
   const [cache, setCache] = useState<Record<string, CompareRow>>({});
   const [busy, setBusy] = useState<Set<string>>(() => new Set());
   const [inspecting, setInspecting] = useState<MigrationEvent | null>(null);
+  const [clientError, setClientError] = useState<string | null>(null);
 
   useEffect(() => {
     setCache({});
     setBusy(new Set());
     setInspecting(null);
+    setClientError(null);
     let cancelled = false;
     fetch(`/api/compare/${encodeURIComponent(r.repo)}`)
       .then((res) => res.json() as Promise<{ rows?: CompareRow[] }>)
@@ -282,15 +289,18 @@ export function AppDetail({
     return best;
   }, null);
   const headerError = overlayRows.find((row) => row.lastError)?.lastError ?? null;
+  const displayError = clientError ?? headerError;
   const anyBusy = busy.size > 0;
+  const refreshAllDisabled = isRefreshAllDisabled(r.repo, anyBusy);
 
   async function refreshAll() {
     setBusy(new Set(["*"]));
     try {
       const rows = await postRefresh(`/api/compare/${encodeURIComponent(r.repo)}/refresh`);
       setCache((prev) => mergeRows(prev, rows));
-    } catch {
-      /* keep last overlay; POST 200 already merges lastError */
+      setClientError(null);
+    } catch (err) {
+      setClientError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(new Set());
     }
@@ -303,8 +313,9 @@ export function AppDetail({
         `/api/compare/${encodeURIComponent(r.repo)}/events/${encodeURIComponent(ev.name)}/refresh`,
       );
       setCache((prev) => mergeRows(prev, rows));
-    } catch {
-      /* keep last overlay; POST 200 already merges lastError */
+      setClientError(null);
+    } catch (err) {
+      setClientError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy((prev) => {
         const next = new Set(prev);
@@ -363,7 +374,7 @@ export function AppDetail({
               <button
                 type="button"
                 className="surf border rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-80 disabled:opacity-40"
-                disabled={anyBusy}
+                disabled={refreshAllDisabled}
                 aria-busy={anyBusy}
                 onClick={() => void refreshAll()}
               >
@@ -372,9 +383,9 @@ export function AppDetail({
               <span className="block txt-3 text-[11px] mt-1">
                 Last refreshed {lastRefreshedAt ? new Date(lastRefreshedAt).toLocaleString() : "Never"}
               </span>
-              {headerError ? (
+              {displayError ? (
                 <span className="block text-[11px] mt-0.5" style={{ color: "var(--st-critical-ink)" }}>
-                  {headerError}
+                  {displayError}
                 </span>
               ) : null}
             </div>

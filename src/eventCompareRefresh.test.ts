@@ -69,6 +69,21 @@ test("refresh keeps Amplitude data when App Intel returns 408", async () => {
   }
 });
 
+test("refreshEventCompare rejects a contract that belongs to another repo", async () => {
+  const { dir, db } = tmpDb();
+  try {
+    await expect(
+      refreshEventCompare("w_outline", "General Experience Loading", db, { pat: "tok" }, {
+        fetchImpl: async () => jsonResponse(200, { data: [["0"]] }),
+        now: fixedNow,
+      }),
+    ).rejects.toThrow("General Experience Loading does not belong to w_outline");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("refreshRepoCompares returns empty for repos without contracts", async () => {
   const { dir, db } = tmpDb();
   try {
