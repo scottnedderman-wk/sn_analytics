@@ -39,3 +39,18 @@ test("openAppDatabase creates file and meta table", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("openAppDatabase creates event_compare table", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sn-analytics-"));
+  const path = join(dir, "app.sqlite");
+  const db = openAppDatabase(path);
+  try {
+    const rows = db
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name='event_compare'")
+      .all();
+    expect(rows.length).toBe(1);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

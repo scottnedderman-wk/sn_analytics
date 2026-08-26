@@ -20,5 +20,13 @@ export function openAppDatabase(sqlitePath: string): Database {
   }
   const db = new Database(sqlitePath, { create: true });
   db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
+  db.run(`CREATE TABLE IF NOT EXISTS event_compare (
+    repo TEXT NOT NULL,
+    event_name TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    refreshed_at TEXT,
+    last_error TEXT,
+    PRIMARY KEY (repo, event_name)
+  )`);
   return db;
 }
