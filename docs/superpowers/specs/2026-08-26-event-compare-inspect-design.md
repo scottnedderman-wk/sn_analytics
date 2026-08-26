@@ -128,7 +128,7 @@ Next to the existing completion block:
 
 No URL change. Focus moves into the dialog; Escape and Close restore it.
 
-**Header:** Amplitude event name; legacy name(s) as subtitle; composite Match % with `pctColor`.
+**Header:** Amplitude event name; legacy name(s) as subtitle; composite Match % with `pctColor`. Dialog width is **80% of the viewport**; keep the existing top offset, max height, and vertical scroll.
 
 **Body, in order:**
 
@@ -142,7 +142,7 @@ No URL change. Focus moves into the dialog; Escape and Close restore it.
 
    App Intel / Amplitude cells are **column name and type** (example: `analytic_date DATE` vs `event_date DATE`), not sample values. Present and Type/format are yes/no (or pending). Populated is fill rate per side (`87%` / `91%`) or pending.
 
-4. **Not compared** — collapsed by default. Lists omitted fields and why (GEL: `experience_name` vs `experienceName`; `session_id`).
+4. **Not compared** — collapsed by default. Lists omitted fields and why (GEL: `experience_name` vs `experienceName`; `session_id`; `page_location`; `page_path`).
 
 GEL can open immediately from the static contract even with no cache row (Present + Type filled from DESCRIBE/mapping; Populated and Volume pending).
 
@@ -156,6 +156,10 @@ GEL can open immediately from the static contract even with no cache row (Presen
 | Workspace | `account_resource_id` VARCHAR | `workspace_id` VARCHAR |
 | Duration | `value` FLOAT | `raw_event_properties:value` (numeric) |
 | Environment | `environment` VARCHAR (`production` / `prod-eu` / `prod-apac`) | `environment` VARCHAR (`us` / `eu` / `apac`) |
+| Page URL | `url` VARCHAR | `page_url` VARCHAR |
+| Host | `host` VARCHAR | `page_domain` VARCHAR |
+
+`page_location` is not scored (duplicate of `page_url` for GEL). `page_path` is not scored (App Intel has no path column; path is implied by `url`). See `2026-08-26-event-compare-page-fields-design.md`.
 
 App Intel destination: `silver_prod.user_analytic.general_experience_loading` (a **view** over lake; scans currently time out). Amplitude destination: `gold_prod.marts.fct_amplitude_events` where `source_event_type = 'General Experience Loading'` and `is_amplitude_generated_event = FALSE`.
 
