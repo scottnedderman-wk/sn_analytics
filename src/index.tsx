@@ -1,9 +1,10 @@
 import { serve } from "bun";
 import index from "./index.html";
 import { openAppDatabase, sqlitePathFromEnv } from "./db";
+import { compareRoutes } from "./eventCompareApi";
 import { listenPort } from "./port";
 
-openAppDatabase(sqlitePathFromEnv());
+const db = openAppDatabase(sqlitePathFromEnv());
 
 const server = serve({
   port: listenPort(),
@@ -37,6 +38,8 @@ const server = serve({
         message: `Hello, ${name}!`,
       });
     },
+
+    ...compareRoutes(db),
   },
 
   development: process.env.NODE_ENV !== "production" && {
