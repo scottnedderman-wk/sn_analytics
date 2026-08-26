@@ -1,4 +1,11 @@
-import { type MouseEvent, type ReactNode } from "react";
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  compareRowFromContract,
+  contractFor,
+  formatScoreTitle,
+  type CompareRow,
+} from "./eventCompare";
+import { EventCompareModal } from "./EventCompareModal";
 import {
   fmt,
   githubRepoUrl,
@@ -9,9 +16,61 @@ import {
   type MigrationEvent,
   type RepoRecord,
 } from "./model";
-import { Badge, Highlight, InternalLink, Meter, UnassessableNote } from "./ui";
+import { Badge, Highlight, InternalLink, MagnifyIcon, Meter, RefreshIcon, UnassessableNote } from "./ui";
 
-function EventRow({ ev, query }: { ev: MigrationEvent; query: string }) {
+async function postRefresh(url: string): Promise<CompareRow[]> {
+  const res = await fetch(url, { method: "POST" });
+  const body = (await res.json()) as { rows?: CompareRow[]; error?: string };
+  if (!res.ok) throw new Error(body.error ?? res.statusText);
+  return body.rows ?? [];
+}
+
+function overlayFor(cache: Record<string, CompareRow>, name: string): CompareRow | null {
+  return cache[name] ?? compareRowFromContract(name);
+}
+
+function mergeRows(prev: Record<string, CompareRow>, rows: CompareRow[]): Record<string, CompareRow> {
+  const next = { ...prev };
+  for (const row of rows) next[row.eventName] = row;
+  return next;
+}
+
+function pendingCompareRow(eventName: string): CompareRow {
+  return (
+    compareRowFromContract(eventName) ?? {
+      eventName,
+      snapshot: null,
+      refreshedAt: null,
+      lastError: null,
+      parts: { present: null, type: null, populated: null, volume: null },
+      match: null,
+    }
+  );
+}
+
+function isRefreshBusy(busy: Set<string>, name: string): boolean {
+  return busy.has("*") || busy.has(name);
+}
+
+function iconBtnClass(disabled: boolean): string {
+  return `inline-flex items-center justify-center rounded p-1 ${disabled ? "opacity-40" : "hover:opacity-70"}`;
+}
+
+function EventRow({
+  ev,
+  query,
+  row,
+  busy,
+  onRefresh,
+  onInspect,
+}: {
+  ev: MigrationEvent;
+  query: string;
+  row: CompareRow | null;
+  busy: Set<string>;
+  onRefresh: () => void;
+  onInspect: () => void;
+}) {
   const legacy = ev.legacy.length ? ev.legacy.join(", ") : "—";
   const vol = ev.v30 > 0 ? fmt(ev.v30) : ev.dev30 > 0 ? `${fmt(ev.dev30)} (dev)` : "—";
   const tmpl = isTemplateName(ev.name, ev.legacy);
@@ -47,6 +106,8 @@ function EventRow({ ev, query }: { ev: MigrationEvent; query: string }) {
       </>
     );
   }
+  const contracted = !!contractFor(ev.name);
+  const refreshDisabled = !contracted || isRefreshBusy(busy, ev.name);
   return (
     <tr className="border-t" style={{ borderColor: "var(--grid)" }}>
       <td className="py-1.5 pr-3 align-top">
@@ -70,12 +131,58 @@ function EventRow({ ev, query }: { ev: MigrationEvent; query: string }) {
       </td>
       <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">{vol}</td>
       <td className="py-1.5 pr-3 align-top text-right whitespace-nowrap text-[11px]">{usage}</td>
-      <td className="py-1.5 align-top text-right whitespace-nowrap text-[11px]">{github}</td>
+      <td className="py-1.5 pr-3 align-top text-right whitespace-nowrap text-[11px]">{github}</td>
+      <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap text-[11px]">
+        {row?.match == null ? (
+          "—"
+        ) : (
+          <span style={{ color: pctColor(row.match) }} title={formatScoreTitle(row.parts)}>
+            {row.match}%
+          </span>
+        )}
+      </td>
+      <td className="py-1.5 pr-3 align-top text-right whitespace-nowrap">
+        <button
+          type="button"
+          className={iconBtnClass(refreshDisabled)}
+          disabled={refreshDisabled}
+          aria-label={`Refresh comparison for ${ev.name}`}
+          onClick={onRefresh}
+        >
+          <RefreshIcon />
+        </button>
+      </td>
+      <td className="py-1.5 align-top text-right whitespace-nowrap">
+        <button
+          type="button"
+          className={iconBtnClass(false)}
+          aria-label={`Inspect ${ev.name}`}
+          onClick={onInspect}
+        >
+          <MagnifyIcon />
+        </button>
+      </td>
     </tr>
   );
 }
 
-function EventTable({ repo, events, query }: { repo: RepoRecord; events: MigrationEvent[]; query: string }) {
+function EventTable({
+  repo,
+  events,
+  query,
+  cache,
+  busy,
+  onRefresh,
+  onInspect,
+}: {
+  repo: RepoRecord;
+  events: MigrationEvent[];
+  query: string;
+  cache: Record<string, CompareRow>;
+  busy: Set<string>;
+  onRefresh: (ev: MigrationEvent) => void;
+  onInspect: (ev: MigrationEvent) => void;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left border-collapse">
@@ -97,14 +204,31 @@ function EventTable({ repo, events, query }: { repo: RepoRecord; events: Migrati
             <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
               Usage
             </th>
-            <th scope="col" className="py-1.5 font-semibold text-right">
+            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
               GitHub
+            </th>
+            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+              Match
+            </th>
+            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+              <span className="sr-only">Refresh</span>
+            </th>
+            <th scope="col" className="py-1.5 font-semibold text-right">
+              <span className="sr-only">Inspect</span>
             </th>
           </tr>
         </thead>
         <tbody>
           {events.map((e) => (
-            <EventRow key={`${e.name}|${e.legacy.join(",")}`} ev={e} query={query} />
+            <EventRow
+              key={`${e.name}|${e.legacy.join(",")}`}
+              ev={e}
+              query={query}
+              row={overlayFor(cache, e.name)}
+              busy={busy}
+              onRefresh={() => onRefresh(e)}
+              onInspect={() => onInspect(e)}
+            />
           ))}
         </tbody>
       </table>
@@ -126,6 +250,69 @@ export function AppDetail({
 }) {
   const { live, scored, pct, unassessable } = repoCompletion(r);
   const events = sortEvents(r.events, "volume");
+  const [cache, setCache] = useState<Record<string, CompareRow>>({});
+  const [busy, setBusy] = useState<Set<string>>(() => new Set());
+  const [inspecting, setInspecting] = useState<MigrationEvent | null>(null);
+
+  useEffect(() => {
+    setCache({});
+    setBusy(new Set());
+    setInspecting(null);
+    let cancelled = false;
+    fetch(`/api/compare/${encodeURIComponent(r.repo)}`)
+      .then((res) => res.json() as Promise<{ rows?: CompareRow[] }>)
+      .then((body) => {
+        if (cancelled) return;
+        const next: Record<string, CompareRow> = {};
+        for (const row of body.rows ?? []) next[row.eventName] = row;
+        setCache(next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [r.repo]);
+
+  const overlayRows = events
+    .map((ev) => overlayFor(cache, ev.name))
+    .filter((row): row is CompareRow => row != null);
+  const lastRefreshedAt = overlayRows.reduce<string | null>((best, row) => {
+    if (!row.refreshedAt) return best;
+    if (!best || row.refreshedAt > best) return row.refreshedAt;
+    return best;
+  }, null);
+  const headerError = overlayRows.find((row) => row.lastError)?.lastError ?? null;
+  const anyBusy = busy.size > 0;
+
+  async function refreshAll() {
+    setBusy(new Set(["*"]));
+    try {
+      const rows = await postRefresh(`/api/compare/${encodeURIComponent(r.repo)}/refresh`);
+      setCache((prev) => mergeRows(prev, rows));
+    } catch {
+      /* keep last overlay; POST 200 already merges lastError */
+    } finally {
+      setBusy(new Set());
+    }
+  }
+
+  async function refreshEvent(ev: MigrationEvent) {
+    setBusy((prev) => new Set(prev).add(ev.name));
+    try {
+      const rows = await postRefresh(
+        `/api/compare/${encodeURIComponent(r.repo)}/events/${encodeURIComponent(ev.name)}/refresh`,
+      );
+      setCache((prev) => mergeRows(prev, rows));
+    } catch {
+      /* keep last overlay; POST 200 already merges lastError */
+    } finally {
+      setBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(ev.name);
+        return next;
+      });
+    }
+  }
 
   return (
     <div>
@@ -171,11 +358,51 @@ export function AppDetail({
               </span>
             </>
           )}
+          {!unassessable ? (
+            <div className="mt-3">
+              <button
+                type="button"
+                className="surf border rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-80 disabled:opacity-40"
+                disabled={anyBusy}
+                aria-busy={anyBusy}
+                onClick={() => void refreshAll()}
+              >
+                Refresh all
+              </button>
+              <span className="block txt-3 text-[11px] mt-1">
+                Last refreshed {lastRefreshedAt ? new Date(lastRefreshedAt).toLocaleString() : "Never"}
+              </span>
+              {headerError ? (
+                <span className="block text-[11px] mt-0.5" style={{ color: "var(--st-critical-ink)" }}>
+                  {headerError}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </header>
       <section className="surf border rounded-lg px-4 py-3">
-        {unassessable ? <UnassessableNote /> : <EventTable repo={r} events={events} query="" />}
+        {unassessable ? (
+          <UnassessableNote />
+        ) : (
+          <EventTable
+            repo={r}
+            events={events}
+            query=""
+            cache={cache}
+            busy={busy}
+            onRefresh={(ev) => void refreshEvent(ev)}
+            onInspect={setInspecting}
+          />
+        )}
       </section>
+      {inspecting ? (
+        <EventCompareModal
+          row={overlayFor(cache, inspecting.name) ?? pendingCompareRow(inspecting.name)}
+          legacy={inspecting.legacy}
+          onClose={() => setInspecting(null)}
+        />
+      ) : null}
     </div>
   );
 }
