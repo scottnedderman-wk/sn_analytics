@@ -2,12 +2,14 @@ import { serve } from "bun";
 import index from "./index.html";
 import { openAppDatabase, sqlitePathFromEnv } from "./db";
 import { compareRoutes } from "./eventCompareApi";
-import { listenPort } from "./port";
+import { homepageRoutes } from "./homepageApi";
+import { listenPort, SERVE_IDLE_TIMEOUT_SECONDS } from "./port";
 
 const db = openAppDatabase(sqlitePathFromEnv());
 
 const server = serve({
   port: listenPort(),
+  idleTimeout: SERVE_IDLE_TIMEOUT_SECONDS,
   routes: {
     "/data.json": () =>
       new Response(Bun.file(new URL("./data.json", import.meta.url)), {
@@ -40,6 +42,7 @@ const server = serve({
     },
 
     ...compareRoutes(db),
+    ...homepageRoutes(),
   },
 
   development: process.env.NODE_ENV !== "production" && {

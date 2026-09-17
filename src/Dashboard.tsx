@@ -4,6 +4,7 @@ import {
   appHref,
   dashboardSummary,
   fmt,
+  formatUpdatedAgo,
   githubRepoUrl,
   pctColor,
   repoCompletion,
@@ -79,8 +80,14 @@ function RepoCard({
           )}
         </span>
         <span className="shrink-0 text-right w-20 hidden sm:block">
-          <span className="block text-[12.5px] tabular-nums font-medium">{r.volume30 ? fmt(r.volume30) : "—"}</span>
-          <span className="block txt-3 text-[10.5px]">30d events</span>
+          <span className="block text-[12.5px] tabular-nums font-medium">
+            {r.volume30 ? fmt(r.volume30) : "—"}
+          </span>
+          <span className="block txt-3 text-[10.5px]">Amp</span>
+          <span className="block text-[12.5px] tabular-nums font-medium mt-1">
+            {r.volume30Ai ? fmt(r.volume30Ai) : "—"}
+          </span>
+          <span className="block txt-3 text-[10.5px]">AI</span>
         </span>
         <span
           className="shrink-0 inline-flex"
@@ -111,19 +118,26 @@ function RepoCard({
 
 export function Dashboard({
   data,
+  onData,
   theme,
   onToggleTheme,
   onTip,
+  now = () => new Date(),
 }: {
   data: DashboardData;
+  onData: (data: DashboardData) => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onTip: (text: string | null, e?: MouseEvent) => void;
+  now?: Date | (() => Date);
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [sortBy, setSortBy] = useState<SortBy>("volume");
   const [openRepos, setOpenRepos] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const nowDate = typeof now === "function" ? now() : now;
 
   const shown = useMemo(() => visibleRepos(data.repos, query, filter, sortBy), [data, query, filter, sortBy]);
   const summary = useMemo(() => dashboardSummary(data.repos), [data]);
@@ -146,6 +160,25 @@ export function Dashboard({
     });
   }
 
+  async function refresh() {
+    setRefreshError(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/homepage/refresh", { method: "POST" });
+      const body = (await res.json()) as { data?: DashboardData; error?: string };
+      if (!res.ok || !body.data) {
+        setRefreshError(body.error ?? res.statusText);
+        return;
+      }
+      onData(body.data);
+      setRefreshError(null);
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <header className="flex items-start justify-between gap-4 mb-1">
@@ -157,7 +190,19 @@ export function Dashboard({
         </div>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       </header>
-      <p className="txt-3 text-[11.5px] mb-6">{data.provenance}</p>
+      <div className="mb-6">
+        <p className="txt-3 text-[11.5px]">
+          {data.provenance}
+          {data.volumeRefreshedAt ?? data.volumeAsOf ? (
+            <> · {formatUpdatedAgo(data.volumeRefreshedAt ?? data.volumeAsOf ?? "", nowDate)}</>
+          ) : null}
+        </p>
+        {refreshError ? (
+          <p className="text-[11px] mt-0.5" style={{ color: "var(--st-critical-ink)" }}>
+            {refreshError}
+          </p>
+        ) : null}
+      </div>
 
       <section aria-label="Summary" className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <div className="surf border rounded-lg px-4 py-3.5">
@@ -292,6 +337,15 @@ export function Dashboard({
             onClick={() => setOpenRepos(new Set())}
           >
             Collapse all
+          </button>
+          <button
+            type="button"
+            className="surf border rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-80 disabled:opacity-40"
+            disabled={busy}
+            aria-busy={busy}
+            onClick={() => void refresh()}
+          >
+            Refresh
           </button>
         </div>
       </section>

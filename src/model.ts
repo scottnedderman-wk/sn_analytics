@@ -15,6 +15,12 @@ export type MigrationEvent = {
   ss_error: string;
   queried: number;
   series30?: number[];
+  aiCategory?: string;
+  aiAction?: string;
+  aiEvent?: string;
+  aiEventExclude?: string[];
+  ai30?: number | null;
+  aiSeries30?: number[];
 };
 
 export type RepoRecord = {
@@ -24,6 +30,7 @@ export type RepoRecord = {
   total: number;
   live: number;
   volume30: number;
+  volume30Ai?: number;
   sources: string[];
   prs: unknown[];
   inv_mapped: number;
@@ -34,8 +41,20 @@ export type DashboardData = {
   provenance: string;
   volumeAsOf?: string;
   volumeWindowDays?: number;
+  volumeRefreshedAt?: string;
   repos: RepoRecord[];
 };
+
+export function formatUpdatedAgo(isoOrYmd: string, now = new Date()): string {
+  const raw = isoOrYmd.length <= 10 ? `${isoOrYmd}T00:00:00.000Z` : isoOrYmd;
+  const then = new Date(raw);
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const day = Date.UTC(then.getUTCFullYear(), then.getUTCMonth(), then.getUTCDate());
+  const days = Math.round((today - day) / 86_400_000);
+  if (days <= 0) return "Updated today";
+  if (days === 1) return "Updated yesterday";
+  return `Updated ${days} days ago`;
+}
 
 export type AppRoute = { page: "home" } | { page: "app"; repo: string } | { page: "unknown" };
 

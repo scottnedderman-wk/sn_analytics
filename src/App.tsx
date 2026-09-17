@@ -10,6 +10,7 @@ export {
   dashboardSummary,
   eventMatches,
   fmt,
+  formatUpdatedAgo,
   isTemplateName,
   parseRoute,
   pctColor,
@@ -123,7 +124,7 @@ export function App() {
     <div className="font-sans text-[13px] leading-relaxed">
       <div className="max-w-[1180px] mx-auto px-5 py-7 pb-24">
         {route.page === "home" ? (
-          <Dashboard data={data} theme={theme} onToggleTheme={toggleTheme} onTip={onTip} />
+          <Dashboard data={data} onData={setData} theme={theme} onToggleTheme={toggleTheme} onTip={onTip} />
         ) : (
           <>
             <div className="flex justify-end mb-1">

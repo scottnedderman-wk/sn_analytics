@@ -19,9 +19,25 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
+function SparkCell({ values }: { values?: number[] }) {
+  return (
+    <td className="py-1.5 pr-2 align-middle text-right w-[1%]">
+      {values && values.length >= 2 ? (
+        <span className="inline-flex justify-end">
+          <Sparkline values={values} />
+        </span>
+      ) : (
+        "—"
+      )}
+    </td>
+  );
+}
+
 export function AppSummary({ repo, query }: { repo: RepoRecord; query: string }) {
   const live = topLiveByVolume(repo.events, 5);
-  const showSpark = live.some((e) => (e.series30?.length ?? 0) >= 2);
+  const showSpark = live.some(
+    (e) => (e.series30?.length ?? 0) >= 2 || (e.aiSeries30?.length ?? 0) >= 2,
+  );
   if (!live.length) {
     return <p className="txt-2 text-[12px]">No live events in the last 30 days.</p>;
   }
@@ -32,16 +48,32 @@ export function AppSummary({ repo, query }: { repo: RepoRecord; query: string })
         <table className="w-full text-left border-collapse">
           <caption className="sr-only">Top live events for {repo.repo}</caption>
           <thead>
-            <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
-              <th scope="col" className="py-1.5 pr-3 font-semibold">
+            <tr>
+              <th rowSpan={2} scope="col" className="py-1.5 pr-3 font-semibold">
                 Event
               </th>
+              <th colSpan={showSpark ? 2 : 1} scope="colgroup" className="py-1.5 font-semibold text-center">
+                Amplitude
+              </th>
+              <th colSpan={showSpark ? 2 : 1} scope="colgroup" className="py-1.5 font-semibold text-center">
+                App Intel
+              </th>
+            </tr>
+            <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
               {showSpark ? (
-                <th scope="col" className="py-1.5 pr-2 font-semibold text-right whitespace-nowrap w-[1%]">
+                <th scope="col" className="py-1.5 pr-2 font-semibold text-right">
                   Last 30d
                 </th>
               ) : null}
-              <th scope="col" className="py-1.5 font-semibold text-right whitespace-nowrap w-[1%]">
+              <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+                30d vol
+              </th>
+              {showSpark ? (
+                <th scope="col" className="py-1.5 pr-2 font-semibold text-right">
+                  Last 30d
+                </th>
+              ) : null}
+              <th scope="col" className="py-1.5 font-semibold text-right">
                 30d vol
               </th>
             </tr>
@@ -54,18 +86,12 @@ export function AppSummary({ repo, query }: { repo: RepoRecord; query: string })
                     <Highlight text={ev.name} query={query} />
                   </span>
                 </td>
-                {showSpark ? (
-                  <td className="py-1.5 pr-2 align-middle text-right w-[1%]">
-                    {ev.series30 && ev.series30.length >= 2 ? (
-                      <span className="inline-flex justify-end">
-                        <Sparkline values={ev.series30} />
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                ) : null}
-                <td className="py-1.5 align-middle text-right tabular-nums whitespace-nowrap w-[1%]">{fmt(ev.v30)}</td>
+                {showSpark ? <SparkCell values={ev.series30} /> : null}
+                <td className="py-1.5 pr-3 align-middle text-right tabular-nums whitespace-nowrap w-[1%]">{fmt(ev.v30)}</td>
+                {showSpark ? <SparkCell values={ev.aiSeries30} /> : null}
+                <td className="py-1.5 align-middle text-right tabular-nums whitespace-nowrap w-[1%]">
+                  {ev.ai30 == null ? "—" : fmt(ev.ai30)}
+                </td>
               </tr>
             ))}
           </tbody>

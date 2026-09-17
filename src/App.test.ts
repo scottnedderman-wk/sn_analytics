@@ -4,6 +4,7 @@ import {
   dashboardSummary,
   eventMatches,
   fmt,
+  formatUpdatedAgo,
   isTemplateName,
   parseRoute,
   pctColor,
@@ -147,4 +148,11 @@ test("sparklinePath baselines at zero and skips empty series", () => {
   expect(sparklinePath([], 100, 20)).toBe("");
   expect(sparklinePath([4], 100, 20)).toBe("");
   expect(sparklinePath([0, 10, 5], 100, 20)).toBe("M0.0,20.0 L50.0,0.0 L100.0,10.0");
+});
+
+test("formatUpdatedAgo uses today / yesterday / N days ago", () => {
+  const now = new Date("2026-09-16T18:00:00Z");
+  expect(formatUpdatedAgo("2026-09-16T12:00:00.000Z", now)).toBe("Updated today");
+  expect(formatUpdatedAgo("2026-09-15T00:00:00.000Z", now)).toBe("Updated yesterday");
+  expect(formatUpdatedAgo("2026-09-13", now)).toBe("Updated 3 days ago");
 });

@@ -21,10 +21,32 @@ const STATEMENTS_URL = `${SNOWFLAKE_ACCOUNT_URL}/api/v2/statements`;
 
 export type FetchImpl = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
+export type StatementSession = {
+  warehouse: string;
+  database: string;
+  schema: string;
+  role?: string;
+};
+
+export const DEFAULT_STATEMENT_SESSION: StatementSession = {
+  warehouse: "PROD_WH",
+  database: "GOLD_PROD",
+  schema: "MARTS",
+  role: "TECH_ANALYST",
+};
+
+export const AI_STATEMENT_SESSION: StatementSession = {
+  warehouse: "PROD_SILVER_LARGE_DBT_WAREHOUSE",
+  database: "SILVER_PROD",
+  schema: "ADMIN",
+  role: "TECH_ANALYST",
+};
+
 export type ExecuteDeps = {
   fetchImpl?: FetchImpl;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  session?: StatementSession;
 };
 
 type SnowflakeStatementResponse = {
@@ -33,18 +55,6 @@ type SnowflakeStatementResponse = {
   statementHandle?: string;
   resultSetMetaData?: { partitionInfo?: unknown[] };
 };
-
-function assertSinglePartition(json: SnowflakeStatementResponse): void {
-  const partitions = json.resultSetMetaData?.partitionInfo?.length ?? 1;
-  if (partitions > 1) {
-    throw new Error(`Snowflake returned ${partitions} result partitions; pagination is not implemented`);
-  }
-}
-
-function statementData(json: SnowflakeStatementResponse): string[][] {
-  assertSinglePartition(json);
-  return json.data!;
-}
 
 async function readJson(res: Response): Promise<{ json: SnowflakeStatementResponse; snippet: string }> {
   const text = await res.text();
@@ -67,6 +77,37 @@ function throwHttpError(status: number, json: SnowflakeStatementResponse, snippe
 const POLL_MS = 1_000;
 const TIMEOUT_MS = 120_000;
 
+async function collectPartitions(
+  json: SnowflakeStatementResponse,
+  creds: SnowflakeCreds,
+  deps: ExecuteDeps,
+  handle = json.statementHandle,
+): Promise<string[][]> {
+  const partitions = json.resultSetMetaData?.partitionInfo?.length ?? 1;
+  const rows = [...(json.data ?? [])];
+  if (partitions <= 1) return rows;
+  if (!handle) {
+    throw new Error(`Snowflake returned ${partitions} result partitions without a statement handle`);
+  }
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  for (let partition = 1; partition < partitions; partition++) {
+    const res = await fetchImpl(`${STATEMENTS_URL}/${handle}?partition=${partition}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${creds.pat}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+    });
+    const { json: part, snippet } = await readJson(res);
+    if (!res.ok || part.data == null) {
+      throwHttpError(res.status, part, snippet);
+    }
+    rows.push(...part.data);
+  }
+  return rows;
+}
+
 async function statementResult(
   res: Response,
   creds: SnowflakeCreds,
@@ -81,7 +122,7 @@ async function statementResult(
   if (!res.ok || json.data == null) {
     throwHttpError(res.status, json, snippet);
   }
-  return statementData(json);
+  return collectPartitions(json, creds, deps);
 }
 
 async function pollStatement(handle: string, creds: SnowflakeCreds, deps: ExecuteDeps): Promise<string[][]> {
@@ -107,7 +148,7 @@ async function pollStatement(handle: string, creds: SnowflakeCreds, deps: Execut
     if (!res.ok || json.data == null) {
       throwHttpError(res.status, json, snippet);
     }
-    return statementData(json);
+    return collectPartitions(json, creds, deps, handle);
   }
 }
 
@@ -117,6 +158,7 @@ export async function executeStatement(
   deps: ExecuteDeps = {},
 ): Promise<string[][]> {
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const session = deps.session ?? DEFAULT_STATEMENT_SESSION;
   const res = await fetchImpl(STATEMENTS_URL, {
     method: "POST",
     headers: {
@@ -126,10 +168,10 @@ export async function executeStatement(
     },
     body: JSON.stringify({
       statement: sql,
-      warehouse: "PROD_WH",
-      database: "GOLD_PROD",
-      schema: "MARTS",
-      role: "TECH_ANALYST",
+      warehouse: session.warehouse,
+      database: session.database,
+      schema: session.schema,
+      role: session.role ?? DEFAULT_STATEMENT_SESSION.role,
       timeout: 120,
     }),
   });

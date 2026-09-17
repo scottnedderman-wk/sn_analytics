@@ -62,15 +62,49 @@ test("executeStatement POSTs SQL and parses data rows", async () => {
   expect(await executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).toEqual([["Clicked Save", "12"]]);
 });
 
-test("executeStatement throws when Snowflake returns multiple partitions", async () => {
-  const fetchImpl = async () =>
-    jsonResponse(200, {
-      data: [["Clicked Save", "1"]],
-      resultSetMetaData: { partitionInfo: [{}, {}] },
+test("executeStatement uses an override session for App Intel", async () => {
+  const fetchImpl = async (_input: string | URL | Request, init?: RequestInit) => {
+    expect(JSON.parse(String(init?.body))).toEqual({
+      statement: "SELECT 1",
+      warehouse: "PROD_SILVER_LARGE_DBT_WAREHOUSE",
+      database: "SILVER_PROD",
+      schema: "ADMIN",
+      role: "TECH_ANALYST",
+      timeout: 120,
     });
-  await expect(executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl })).rejects.toThrow(
-    "Snowflake returned 2 result partitions; pagination is not implemented",
-  );
+    return jsonResponse(200, { data: [["1"]] });
+  };
+  expect(
+    await executeStatement("SELECT 1", { pat: "tok" }, {
+      fetchImpl,
+      session: {
+        warehouse: "PROD_SILVER_LARGE_DBT_WAREHOUSE",
+        database: "SILVER_PROD",
+        schema: "ADMIN",
+      },
+    }),
+  ).toEqual([["1"]]);
+});
+
+test("executeStatement fetches remaining partitions and concatenates rows", async () => {
+  const urls: string[] = [];
+  const fetchImpl: FetchImpl = async (input, init) => {
+    urls.push(`${init?.method ?? "GET"} ${String(input)}`);
+    if ((init?.method ?? "GET") === "POST") {
+      return jsonResponse(200, {
+        data: [["Clicked Save", "1"]],
+        statementHandle: "h1",
+        resultSetMetaData: { partitionInfo: [{}, {}] },
+      });
+    }
+    return jsonResponse(200, { data: [["Clicked Open", "2"]] });
+  };
+  const rows = await executeStatement("SELECT 1", { pat: "tok" }, { fetchImpl });
+  expect(rows).toEqual([
+    ["Clicked Save", "1"],
+    ["Clicked Open", "2"],
+  ]);
+  expect(urls[1]).toBe(`GET ${SNOWFLAKE_ACCOUNT_URL}/api/v2/statements/h1?partition=1`);
 });
 
 test("executeStatement throws auth/permission on 401", async () => {

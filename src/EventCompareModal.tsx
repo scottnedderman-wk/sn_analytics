@@ -12,8 +12,8 @@ function scoreChip(n: number | null): string {
   return n == null ? "pending" : `${n}%`;
 }
 
-function volumeText(n: number | null | undefined): string {
-  return n == null ? "pending" : n.toLocaleString();
+function volumeText(n: number | null | undefined, empty = "pending"): string {
+  return n == null ? empty : n.toLocaleString();
 }
 
 function fillPct(n: number | null): string | null {
@@ -114,7 +114,7 @@ export function EventCompareModal({
         aria-modal="true"
         aria-labelledby={headingId}
         tabIndex={-1}
-        className="surf border rounded-lg fixed z-50 inset-x-4 top-8 mx-auto max-w-3xl max-h-[calc(100vh-4rem)] overflow-y-auto p-5 outline-none"
+        className="surf border rounded-lg fixed z-50 inset-x-4 top-8 mx-auto w-[80vw] max-h-[calc(100vh-4rem)] overflow-y-auto p-5 outline-none"
         style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}
       >
         <header className="flex items-start justify-between gap-3 mb-4">
@@ -190,6 +190,37 @@ export function EventCompareModal({
             <dt className="txt-3">Last refreshed</dt>
             <dd className="text-right">{row.refreshedAt ? new Date(row.refreshedAt).toLocaleString() : "Never"}</dd>
           </dl>
+          {row.snapshot?.daily?.length ? (
+            <>
+              <table className="w-full text-left border-collapse text-[12px] mt-3">
+                <thead>
+                  <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
+                    <th scope="col" className="py-1.5 pr-3 font-semibold">
+                      Day
+                    </th>
+                    <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+                      App Intel
+                    </th>
+                    <th scope="col" className="py-1.5 font-semibold text-right">
+                      Amplitude
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row.snapshot.daily.map((d) => (
+                    <tr key={d.date} className="border-t" style={{ borderColor: "var(--grid)" }}>
+                      <td className="py-1 pr-3">{d.date}</td>
+                      <td className="py-1 pr-3 text-right tabular-nums">{volumeText(d.ai, "—")}</td>
+                      <td className="py-1 text-right tabular-nums">{volumeText(d.amp, "—")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="txt-3 text-[11px] mt-2">
+                Volume % uses days present on both sides. An em dash is warehouse lag, not a dual-write miss.
+              </p>
+            </>
+          ) : null}
         </section>
 
         <section className="mb-4 overflow-x-auto">

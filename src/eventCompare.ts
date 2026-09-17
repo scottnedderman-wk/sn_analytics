@@ -1,12 +1,35 @@
-export type FieldKey = "event_time" | "user" | "organization" | "workspace" | "duration" | "environment";
+export type FieldKey = "event_time" | "user" | "organization" | "workspace" | "duration" | "environment" | "page_url" | "host";
 export type ScoreParts = { present: number | null; type: number | null; populated: number | null; volume: number | null };
 export type ContractField = { key: FieldKey; label: string; aiColumn: string; aiType: string; ampColumn: string; ampType: string; present: boolean; typeCompatible: boolean };
-export type EventContract = { eventName: string; repo: string; aiTable: string; ampEventType: string; fields: ContractField[]; omitted: Array<{ name: string; reason: string }>; ampEnvs: string[]; aiEnvs: string[] };
+export type EventContract = {
+  eventName: string;
+  repo: string;
+  aiTable: string;
+  aiDateExpr: string;
+  aiCategory: string;
+  aiAction: string;
+  aiEvent?: string;
+  aiEventExclude?: string[];
+  ampEventType: string;
+  fields: ContractField[];
+  omitted: Array<{ name: string; reason: string }>;
+  ampEnvs: string[];
+  aiEnvs: string[];
+};
 export type SnapshotField = { key: string; aiColumn: string; aiType: string; ampColumn: string; ampType: string; present: boolean; typeCompatible: boolean; aiFill: number | null; ampFill: number | null };
-export type CompareSnapshot = { version: 1; window: { start: string; end: string }; volume: { ai: number | null; amp: number | null }; fields: SnapshotField[] };
+export type DailyVolume = { date: string; ai: number | null; amp: number | null };
+export type CompareSnapshot = {
+  version: 1;
+  window: { start: string; end: string };
+  volume: { ai: number | null; amp: number | null };
+  daily?: DailyVolume[];
+  fields: SnapshotField[];
+};
 export type CompareRow = { eventName: string; snapshot: CompareSnapshot | null; refreshedAt: string | null; lastError: string | null; parts: ScoreParts; match: number | null };
 
 export const POPULATED_FLOOR = 0.5;
+export const INGEST_LAG_DAYS = 2;
+export const VOLUME_WINDOW_DAYS = 7;
 
 export function ymdUtc(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -14,10 +37,19 @@ export function ymdUtc(d: Date): string {
 
 export function closedDayWindow(now = new Date()): { start: string; end: string } {
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  end.setUTCDate(end.getUTCDate() - 1);
+  end.setUTCDate(end.getUTCDate() - INGEST_LAG_DAYS);
   const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - 6);
+  start.setUTCDate(start.getUTCDate() - (VOLUME_WINDOW_DAYS - 1));
   return { start: ymdUtc(start), end: ymdUtc(end) };
+}
+
+export function overlapVolume(daily: DailyVolume[]): { ai: number; amp: number } | null {
+  const both = daily.filter((d) => d.ai != null && d.amp != null);
+  if (!both.length) return null;
+  return {
+    ai: both.reduce((s, d) => s + (d.ai ?? 0), 0),
+    amp: both.reduce((s, d) => s + (d.amp ?? 0), 0),
+  };
 }
 
 function isDateLike(t: string): boolean {
@@ -35,6 +67,10 @@ function isNumeric(t: string): boolean {
 
 export function typesCompatible(aiType: string, ampType: string, key: FieldKey): boolean {
   if (key === "environment") return isString(aiType) && isString(ampType);
+  if (key === "event_time") {
+    const aiOk = isDateLike(aiType) || isString(aiType);
+    return aiOk && isDateLike(ampType);
+  }
   if (isDateLike(aiType) && isDateLike(ampType)) return true;
   if (isString(aiType) && isString(ampType)) return true;
   if (isNumeric(aiType) && isNumeric(ampType)) return true;
@@ -42,29 +78,120 @@ export function typesCompatible(aiType: string, ampType: string, key: FieldKey):
 }
 
 const gelFields: ContractField[] = [
-  { key: "event_time", label: "Event time", aiColumn: "analytic_date", aiType: "DATE", ampColumn: "event_date", ampType: "DATE", present: true, typeCompatible: true },
-  { key: "user", label: "User", aiColumn: "user_resource_id", aiType: "VARCHAR", ampColumn: "user_resource_id", ampType: "VARCHAR", present: true, typeCompatible: true },
-  { key: "organization", label: "Organization", aiColumn: "organization_id", aiType: "VARCHAR", ampColumn: "organization_id", ampType: "VARCHAR", present: true, typeCompatible: true },
-  { key: "workspace", label: "Workspace", aiColumn: "account_resource_id", aiType: "VARCHAR", ampColumn: "workspace_id", ampType: "VARCHAR", present: true, typeCompatible: true },
-  { key: "duration", label: "Duration", aiColumn: "value", aiType: "FLOAT", ampColumn: "raw_event_properties:value", ampType: "NUMBER", present: true, typeCompatible: true },
+  { key: "event_time", label: "Event time", aiColumn: "dimensions:timestamp", aiType: "VARCHAR ISO", ampColumn: "event_date", ampType: "DATE", present: true, typeCompatible: true },
+  { key: "user", label: "User", aiColumn: "dimensions:user_resource_id", aiType: "VARCHAR", ampColumn: "user_resource_id", ampType: "VARCHAR", present: true, typeCompatible: true },
+  { key: "organization", label: "Organization", aiColumn: "dimensions:organization_id", aiType: "VARCHAR", ampColumn: "organization_id", ampType: "VARCHAR", present: true, typeCompatible: true },
+  { key: "workspace", label: "Workspace", aiColumn: "dimensions:account_resource_id", aiType: "VARCHAR", ampColumn: "workspace_id", ampType: "VARCHAR", present: true, typeCompatible: true },
+  { key: "duration", label: "Duration", aiColumn: "value", aiType: "VARIANT INTEGER", ampColumn: "raw_event_properties:value", ampType: "NUMBER", present: true, typeCompatible: true },
   { key: "environment", label: "Environment", aiColumn: "environment", aiType: "VARCHAR", ampColumn: "environment", ampType: "VARCHAR", present: true, typeCompatible: true },
+  { key: "page_url", label: "Page URL", aiColumn: "dimensions:url", aiType: "VARCHAR", ampColumn: "page_url", ampType: "VARCHAR", present: true, typeCompatible: true },
+  { key: "host", label: "Host", aiColumn: "dimensions:host", aiType: "VARCHAR", ampColumn: "page_domain", ampType: "VARCHAR", present: true, typeCompatible: true },
 ];
+
+const AI_TABLE = "SILVER_PROD.ADMIN.USER_ANALYTIC";
+const AI_DATE_EXPR = "TRY_TO_TIMESTAMP(dimensions:timestamp::VARCHAR)::DATE";
+const AMP_ENVS = ["us", "eu", "apac"];
+const AI_ENVS = ["production", "prod-eu", "prod-apac"];
+
+const sharedOmitted: EventContract["omitted"] = [
+  { name: "session_id", reason: "App Intel session_id is an obfuscated token; Amplitude session_id is epoch milliseconds." },
+  { name: "page_location", reason: "Same as Amplitude page_url for this event; do not score it twice." },
+  { name: "page_path", reason: "Amplitude pathname only. App Intel has no path column; path is implied by url." },
+];
+
+const experienceOmitted: EventContract["omitted"] = [
+  { name: "experience_name vs experienceName", reason: "App Intel stores the route segment; Amplitude stores a telemetry label like Experience loaded in (ms)_TextBox-embedded." },
+  ...sharedOmitted,
+];
+
+const envelopeFields: ContractField[] = gelFields.filter((f) => f.key !== "duration");
 
 export const GEL_CONTRACT: EventContract = {
   eventName: "General Experience Loading",
   repo: "wdesk_sdk",
-  aiTable: "silver_prod.user_analytic.general_experience_loading",
+  aiTable: AI_TABLE,
+  aiDateExpr: AI_DATE_EXPR,
+  aiCategory: "general",
+  aiAction: "experience-loading",
   ampEventType: "General Experience Loading",
   fields: gelFields,
-  omitted: [
-    { name: "experience_name vs experienceName", reason: "App Intel stores the route segment; Amplitude stores a telemetry label like Experience loaded in (ms)_TextBox-embedded." },
-    { name: "session_id", reason: "App Intel session_id is an obfuscated token; Amplitude session_id is epoch milliseconds." },
-  ],
-  ampEnvs: ["us", "eu", "apac"],
-  aiEnvs: ["production", "prod-eu", "prod-apac"],
+  omitted: experienceOmitted,
+  ampEnvs: AMP_ENVS,
+  aiEnvs: AI_ENVS,
 };
 
-const CONTRACTS: EventContract[] = [GEL_CONTRACT];
+function sdkContract(over: {
+  eventName: string;
+  aiCategory: string;
+  aiAction: string;
+  aiEvent?: string;
+  aiEventExclude?: string[];
+  fields?: ContractField[];
+  omitted?: EventContract["omitted"];
+}): EventContract {
+  return {
+    repo: "wdesk_sdk",
+    aiTable: AI_TABLE,
+    aiDateExpr: AI_DATE_EXPR,
+    ampEventType: over.eventName,
+    fields: over.fields ?? envelopeFields,
+    omitted: over.omitted ?? sharedOmitted,
+    ampEnvs: AMP_ENVS,
+    aiEnvs: AI_ENVS,
+    ...over,
+  };
+}
+
+const DEDICATED: Array<{ eventName: string; aiCategory: string; aiAction: string; omitted?: EventContract["omitted"] }> = [
+  { eventName: "General Experience Unloading", aiCategory: "general", aiAction: "experience-unloading", omitted: experienceOmitted },
+  { eventName: "Unload General Experience", aiCategory: "general", aiAction: "experience-unloaded", omitted: experienceOmitted },
+  { eventName: "Connect W Transport Web Socket", aiCategory: "wTransport", aiAction: "webSocket-connect" },
+  { eventName: "Open Workspace", aiCategory: "workspace", aiAction: "open" },
+  { eventName: "Open Organization", aiCategory: "organization", aiAction: "open" },
+  { eventName: "Insert General Experience Embedded", aiCategory: "general", aiAction: "experience-embedded-insert", omitted: experienceOmitted },
+  { eventName: "General Browser Upgrade Modal", aiCategory: "general", aiAction: "browser-upgrade-modal" },
+  { eventName: "Open Marketplace External", aiCategory: "marketplace", aiAction: "open-external" },
+];
+
+const NAMED_SHELL: Array<[string, string]> = [
+  ["About Workiva", "aboutWorkiva"],
+  ["Change Workspace", "changeWorkspace"],
+  ["Create Menu", "createMenu"],
+  ["Create Workspace", "createWorkspace"],
+  ["Help Menu", "helpMenu"],
+  ["Keyboard Shortcuts", "keyboardShortcuts"],
+  ["Kpmg Support", "kpmgSupport"],
+  ["Logo", "logo"],
+  ["Members", "members"],
+  ["My Profile", "myProfile"],
+  ["Open Experience Already", "experienceAlreadyOpen"],
+  ["Open Workspace In New Tab", "openWorkspaceInNewTab"],
+  ["Open Wtab In New Browser Tab", "openWtabInNewBrowserTab"],
+  ["Org Admin", "orgAdmin"],
+  ["Privacy Policy", "privacyPolicy"],
+  ["Profile Menu", "profileMenu"],
+  ["Service Provider Admin", "serviceProviderAdmin"],
+  ["Sign Out", "signOut"],
+  ["Super Admin", "superAdmin"],
+  ["Support Chat", "supportChat"],
+  ["Switch Org", "switchOrg"],
+  ["Workspace Menu", "workspaceMenu"],
+  ["Workspace Settings", "workspaceSettings"],
+];
+
+const CONTRACTS: EventContract[] = [
+  GEL_CONTRACT,
+  ...DEDICATED.map((c) => sdkContract(c)),
+  ...NAMED_SHELL.map(([eventName, aiEvent]) =>
+    sdkContract({ eventName, aiCategory: "shell", aiAction: "generic-analytic", aiEvent }),
+  ),
+  sdkContract({
+    eventName: "Shell Generic Analytic",
+    aiCategory: "shell",
+    aiAction: "generic-analytic",
+    aiEventExclude: NAMED_SHELL.map(([, aiEvent]) => aiEvent),
+  }),
+];
 
 export function contractFor(eventName: string): EventContract | undefined {
   return CONTRACTS.find((c) => c.eventName === eventName);

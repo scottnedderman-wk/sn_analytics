@@ -7,6 +7,7 @@ import {
   contractFor,
   contractsForRepo,
   formatScoreTitle,
+  overlapVolume,
   populatedScore,
   scoreParts,
   typesCompatible,
@@ -16,18 +17,31 @@ import {
   type SnapshotField,
 } from "./eventCompare";
 
-test("closedDayWindow is last 7 UTC days excluding today", () => {
+test("closedDayWindow is last 7 UTC days ending 2 days ago", () => {
   expect(closedDayWindow(new Date("2026-08-26T16:00:00Z"))).toEqual({
-    start: "2026-08-19",
-    end: "2026-08-25",
+    start: "2026-08-18",
+    end: "2026-08-24",
   });
+});
+
+test("overlapVolume sums only days present on both sides", () => {
+  expect(overlapVolume([])).toBeNull();
+  expect(
+    overlapVolume([
+      { date: "2026-09-08", ai: 2210665, amp: 2149377 },
+      { date: "2026-09-09", ai: 2344244, amp: 2276995 },
+      { date: "2026-09-10", ai: 222574, amp: 2187402 },
+      { date: "2026-09-11", ai: null, amp: 1000 },
+    ]),
+  ).toEqual({ ai: 4777483, amp: 6613774 });
 });
 
 test("typesCompatible matches spec rules", () => {
   expect(typesCompatible("DATE", "DATE", "event_time")).toBe(true);
   expect(typesCompatible("TIMESTAMP_NTZ", "DATE", "event_time")).toBe(true);
+  expect(typesCompatible("VARCHAR ISO", "DATE", "event_time")).toBe(true);
   expect(typesCompatible("VARCHAR", "VARCHAR", "user")).toBe(true);
-  expect(typesCompatible("FLOAT", "NUMBER", "duration")).toBe(true);
+  expect(typesCompatible("VARIANT INTEGER", "NUMBER", "duration")).toBe(true);
   expect(typesCompatible("VARCHAR", "VARCHAR", "environment")).toBe(true);
   expect(typesCompatible("BOOLEAN", "VARCHAR", "user")).toBe(false);
 });
@@ -35,9 +49,67 @@ test("typesCompatible matches spec rules", () => {
 test("GEL contract is registered for wdesk_sdk", () => {
   const c = contractFor("General Experience Loading");
   expect(c?.repo).toBe("wdesk_sdk");
-  expect(c?.fields).toHaveLength(6);
-  expect(contractsForRepo("wdesk_sdk").map((x) => x.eventName)).toEqual(["General Experience Loading"]);
+  expect(c?.aiTable).toBe("SILVER_PROD.ADMIN.USER_ANALYTIC");
+  expect(c?.aiDateExpr).toBe("TRY_TO_TIMESTAMP(dimensions:timestamp::VARCHAR)::DATE");
+  expect(c?.aiCategory).toBe("general");
+  expect(c?.aiAction).toBe("experience-loading");
+  expect(c?.fields).toHaveLength(8);
+  expect(c?.fields.map((f) => f.key)).toEqual([
+    "event_time",
+    "user",
+    "organization",
+    "workspace",
+    "duration",
+    "environment",
+    "page_url",
+    "host",
+  ]);
+  expect(c?.fields.find((f) => f.key === "user")).toMatchObject({
+    aiColumn: "dimensions:user_resource_id",
+    ampColumn: "user_resource_id",
+  });
+  expect(c?.fields.find((f) => f.key === "page_url")).toMatchObject({
+    aiColumn: "dimensions:url",
+    ampColumn: "page_url",
+  });
+  expect(c?.fields.find((f) => f.key === "host")).toMatchObject({
+    aiColumn: "dimensions:host",
+    ampColumn: "page_domain",
+  });
+  expect(c?.omitted.map((o) => o.name)).toEqual([
+    "experience_name vs experienceName",
+    "session_id",
+    "page_location",
+    "page_path",
+  ]);
+  expect(contractsForRepo("wdesk_sdk").map((x) => x.eventName)).toContain("General Experience Loading");
+  expect(contractsForRepo("wdesk_sdk").length).toBeGreaterThan(20);
   expect(contractsForRepo("w_outline")).toEqual([]);
+});
+
+test("named shell events filter dimensions:event", () => {
+  const c = contractFor("Open Experience Already");
+  expect(c?.aiCategory).toBe("shell");
+  expect(c?.aiAction).toBe("generic-analytic");
+  expect(c?.aiEvent).toBe("experienceAlreadyOpen");
+  expect(c?.aiEventExclude).toBeUndefined();
+});
+
+test("Shell Generic Analytic excludes named shell events", () => {
+  const c = contractFor("Shell Generic Analytic");
+  expect(c?.aiCategory).toBe("shell");
+  expect(c?.aiAction).toBe("generic-analytic");
+  expect(c?.aiEvent).toBeUndefined();
+  expect(c?.aiEventExclude).toContain("experienceAlreadyOpen");
+  expect(c?.aiEventExclude).toContain("aboutWorkiva");
+  expect(contractFor("Connect W Transport Web Socket")).toMatchObject({
+    aiCategory: "wTransport",
+    aiAction: "webSocket-connect",
+  });
+  expect(contractFor("General Experience Unloading")).toMatchObject({
+    aiCategory: "general",
+    aiAction: "experience-unloading",
+  });
 });
 
 test("compositeScore averages non-pending parts only", () => {

@@ -4,13 +4,17 @@ import {
   compareRowFromCache,
   contractFor,
   contractsForRepo,
+  overlapVolume,
+  ymdUtc,
   type CompareRow,
   type CompareSnapshot,
   type ContractField,
+  type DailyVolume,
   type EventContract,
 } from "./eventCompare";
 import { getCompareCache, pendingSnapshot, putCompareCache } from "./eventCompareCache";
 import {
+  AI_STATEMENT_SESSION,
   executeStatement,
   type ExecuteDeps,
   type SnowflakeCreds,
@@ -18,8 +22,8 @@ import {
 
 export type RefreshDeps = Omit<ExecuteDeps, "now"> & { now?: () => Date };
 
-function execDeps(deps?: RefreshDeps): ExecuteDeps {
-  return { fetchImpl: deps?.fetchImpl, sleep: deps?.sleep };
+function execDeps(deps?: RefreshDeps, session?: ExecuteDeps["session"]): ExecuteDeps {
+  return { fetchImpl: deps?.fetchImpl, sleep: deps?.sleep, session };
 }
 
 function ampWhere(contract: EventContract, window: { start: string; end: string }): string {
@@ -29,9 +33,27 @@ function ampWhere(contract: EventContract, window: { start: string; end: string 
   AND environment IN ('${contract.ampEnvs.join("','")}')`;
 }
 
+function sqlString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 function aiWhere(contract: EventContract, window: { start: string; end: string }): string {
-  return `analytic_date BETWEEN '${window.start}' AND '${window.end}'
-  AND environment IN ('${contract.aiEnvs.join("','")}')`;
+  const parts = [
+    `${contract.aiDateExpr} BETWEEN '${window.start}' AND '${window.end}'`,
+    `category = ${sqlString(contract.aiCategory)}`,
+    `action = ${sqlString(contract.aiAction)}`,
+    `environment IN ('${contract.aiEnvs.join("','")}')`,
+  ];
+  if (contract.aiEvent) {
+    parts.push(`dimensions:event::VARCHAR = ${sqlString(contract.aiEvent)}`);
+  }
+  if (contract.aiEventExclude?.length) {
+    parts.push(`dimensions:event::VARCHAR NOT IN (${contract.aiEventExclude.map(sqlString).join(",")})`);
+    parts.push(`dimensions:event::VARCHAR NOT LIKE 'progressItem.%'`);
+    parts.push(`dimensions:event::VARCHAR NOT LIKE 'notificationItem.%'`);
+    parts.push(`dimensions:event::VARCHAR NOT LIKE 'createMenuItem.%'`);
+  }
+  return parts.join("\n  AND ");
 }
 
 function ampCountExpr(field: ContractField): string {
@@ -45,13 +67,25 @@ function aiCountExpr(field: ContractField): string {
   if (field.key === "duration") {
     return "COUNT(value)";
   }
+  if (field.key === "event_time") {
+    return `COUNT(${contractDateOrColumn(field.aiColumn)})`;
+  }
   return `COUNT(${field.aiColumn})`;
 }
 
+function contractDateOrColumn(aiColumn: string): string {
+  if (aiColumn === "dimensions:timestamp") {
+    return "TRY_TO_TIMESTAMP(dimensions:timestamp::VARCHAR)";
+  }
+  return aiColumn;
+}
+
 export function ampVolumeSql(contract: EventContract, window: { start: string; end: string }): string {
-  return `SELECT COUNT(*) AS event_count
+  return `SELECT event_date::VARCHAR AS d, COUNT(*) AS event_count
 FROM gold_prod.marts.fct_amplitude_events
-WHERE ${ampWhere(contract, window)}`;
+WHERE ${ampWhere(contract, window)}
+GROUP BY 1
+ORDER BY 1`;
 }
 
 export function ampFillSql(contract: EventContract, window: { start: string; end: string }): string {
@@ -62,9 +96,11 @@ WHERE ${ampWhere(contract, window)}`;
 }
 
 export function aiVolumeSql(contract: EventContract, window: { start: string; end: string }): string {
-  return `SELECT COUNT(*) AS event_count
+  return `SELECT ${contract.aiDateExpr}::VARCHAR AS d, COUNT(*) AS event_count
 FROM ${contract.aiTable}
-WHERE ${aiWhere(contract, window)}`;
+WHERE ${aiWhere(contract, window)}
+GROUP BY 1
+ORDER BY 1`;
 }
 
 export function aiFillSql(contract: EventContract, window: { start: string; end: string }): string {
@@ -76,6 +112,45 @@ WHERE ${aiWhere(contract, window)}`;
 
 function parseCount(cell: string | undefined): number {
   return Number.parseFloat(cell ?? "0") || 0;
+}
+
+function eachUtcDate(window: { start: string; end: string }): string[] {
+  const out: string[] = [];
+  const cursor = new Date(`${window.start}T00:00:00Z`);
+  const last = new Date(`${window.end}T00:00:00Z`);
+  while (cursor.getTime() <= last.getTime()) {
+    out.push(ymdUtc(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+
+function dailyMap(rows: string[][]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const date = row[0] ?? "";
+    if (!date) continue;
+    map.set(date, parseCount(row[1]));
+  }
+  return map;
+}
+
+function mergeDaily(
+  window: { start: string; end: string },
+  ampRows: string[][],
+  aiRows: string[][] | null,
+): DailyVolume[] {
+  const amp = dailyMap(ampRows);
+  const ai = aiRows ? dailyMap(aiRows) : null;
+  return eachUtcDate(window).map((date) => ({
+    date,
+    amp: amp.has(date) ? amp.get(date)! : null,
+    ai: ai?.has(date) ? ai.get(date)! : null,
+  }));
+}
+
+function sumPresent(daily: DailyVolume[], side: "ai" | "amp"): number {
+  return daily.reduce((s, d) => s + (d[side] ?? 0), 0);
 }
 
 function applyFills(
@@ -109,18 +184,20 @@ export async function refreshEventCompare(
   const now = clock();
   const window = closedDayWindow(now);
   const existing = getCompareCache(db, repo, eventName);
-  const exec = execDeps(deps);
+  const ampExec = execDeps(deps);
+  const aiExec = execDeps(deps, AI_STATEMENT_SESSION);
 
   let snapshot = pendingSnapshot(contract, window);
   let lastError: string | null = null;
   let ampOk = false;
+  let ampRows: string[][] = [];
 
   try {
-    const volRows = await executeStatement(ampVolumeSql(contract, window), creds, exec);
-    const fillRows = await executeStatement(ampFillSql(contract, window), creds, exec);
-    snapshot.volume.amp = parseCount(volRows[0]?.[0]);
-    const fillRow = fillRows[0] ?? [];
-    applyFills(snapshot, fillRow, "ampFill");
+    ampRows = await executeStatement(ampVolumeSql(contract, window), creds, ampExec);
+    const fillRows = await executeStatement(ampFillSql(contract, window), creds, ampExec);
+    snapshot.daily = mergeDaily(window, ampRows, null);
+    snapshot.volume.amp = sumPresent(snapshot.daily, "amp");
+    applyFills(snapshot, fillRows[0] ?? [], "ampFill");
     ampOk = true;
   } catch (err) {
     lastError = errorMessage(err);
@@ -131,11 +208,17 @@ export async function refreshEventCompare(
 
   if (ampOk) {
     try {
-      const volRows = await executeStatement(aiVolumeSql(contract, window), creds, exec);
-      const fillRows = await executeStatement(aiFillSql(contract, window), creds, exec);
-      snapshot.volume.ai = parseCount(volRows[0]?.[0]);
-      const fillRow = fillRows[0] ?? [];
-      applyFills(snapshot, fillRow, "aiFill");
+      const aiRows = await executeStatement(aiVolumeSql(contract, window), creds, aiExec);
+      const fillRows = await executeStatement(aiFillSql(contract, window), creds, aiExec);
+      snapshot.daily = mergeDaily(window, ampRows, aiRows);
+      const overlap = overlapVolume(snapshot.daily);
+      if (overlap) {
+        snapshot.volume.ai = overlap.ai;
+        snapshot.volume.amp = overlap.amp;
+      } else {
+        snapshot.volume.ai = null;
+      }
+      applyFills(snapshot, fillRows[0] ?? [], "aiFill");
     } catch (err) {
       lastError = errorMessage(err);
     }
@@ -163,8 +246,8 @@ export async function refreshRepoCompares(
   deps?: RefreshDeps,
 ): Promise<CompareRow[]> {
   const rows: CompareRow[] = [];
-  for (const contract of contractsForRepo(repo)) {
-    rows.push(await refreshEventCompare(repo, contract.eventName, db, creds, deps));
+  for (const c of contractsForRepo(repo)) {
+    rows.push(await refreshEventCompare(repo, c.eventName, db, creds, deps));
   }
   return rows;
 }

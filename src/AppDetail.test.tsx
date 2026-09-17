@@ -39,6 +39,7 @@ const repo = (over: Partial<RepoRecord> = {}): RepoRecord => ({
 });
 
 const gel = event({ name: "General Experience Loading", legacy: ["GeneralExperienceLoadingEventV2"] });
+const shell = event({ name: "Shell Generic Analytic", legacy: ["ShellGenericAnalyticEventV2"] });
 
 function refreshButtonHtml(html: string, eventName: string): string {
   const match = html.match(new RegExp(`<button[^>]*aria-label="Refresh comparison for ${eventName}"[^>]*>`));
@@ -60,10 +61,14 @@ test("GEL refresh is enabled and an uncontracted event refresh is disabled", () 
   const gelHtml = renderToString(
     <EventRow ev={gel} query="" row={null} busy={new Set()} onRefresh={() => {}} onInspect={() => {}} />,
   );
+  const shellHtml = renderToString(
+    <EventRow ev={shell} query="" row={null} busy={new Set()} onRefresh={() => {}} onInspect={() => {}} />,
+  );
   const otherHtml = renderToString(
     <EventRow ev={event()} query="" row={null} busy={new Set()} onRefresh={() => {}} onInspect={() => {}} />,
   );
   expect(refreshButtonHtml(gelHtml, gel.name)).not.toContain("disabled");
+  expect(refreshButtonHtml(shellHtml, shell.name)).not.toContain("disabled");
   expect(refreshButtonHtml(otherHtml, event().name)).toContain("disabled");
 });
 
