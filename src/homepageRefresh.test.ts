@@ -30,18 +30,25 @@ test("ampHomepageVolumeSql with empty names uses AND FALSE", () => {
   expect(sql).not.toContain("IN ()");
 });
 
-test("aiHomepageVolumeSql restricts to identities", () => {
+test("aiHomepageVolumeSql dedicated identities aggregate without grouping by event", () => {
   const sql = aiHomepageVolumeSql(window, [
     { aiCategory: "general", aiAction: "experience-loading" },
+    { aiCategory: "workspace", aiAction: "create" },
+  ]);
+  expect(sql).toContain("NULL AS ev");
+  expect(sql).toContain("(category, action) IN (('general','experience-loading'),('workspace','create'))");
+  expect(sql).toContain("GROUP BY 1, 2");
+  expect(sql).not.toContain("GROUP BY 1, 2, 3");
+  expect(sql).not.toContain("dimensions:event::VARCHAR");
+});
+
+test("aiHomepageVolumeSql named identities compact event filters per pair", () => {
+  const sql = aiHomepageVolumeSql(window, [
+    { aiCategory: "shell", aiAction: "generic-analytic", aiEvent: "aboutWorkiva" },
     { aiCategory: "shell", aiAction: "generic-analytic", aiEvent: "O'Brien" },
   ]);
-  expect(sql).toContain("SILVER_PROD.ADMIN.USER_ANALYTIC");
-  expect(sql).toContain("TRY_TO_TIMESTAMP(dimensions:timestamp::VARCHAR)::DATE");
-  expect(sql).toContain("environment IN ('production','prod-eu','prod-apac')");
-  expect(sql).not.toContain("analytic_date");
+  expect(sql).toContain("dimensions:event::VARCHAR IN ('aboutWorkiva','O''Brien')");
   expect(sql).toContain("GROUP BY 1, 2, 3");
-  expect(sql).toContain("(category, action) IN (('general','experience-loading'))");
-  expect(sql).toContain("dimensions:event::VARCHAR = 'O''Brien'");
 });
 
 test("aiHomepageVolumeSql remainder identity aggregates without grouping by event", () => {
@@ -75,16 +82,13 @@ test("ampHomepageDailySql with empty names uses AND FALSE", () => {
   expect(sql).not.toContain("IN ()");
 });
 
-test("aiHomepageDailySql restricts to preview identities and formats dates", () => {
+test("aiHomepageDailySql dedicated identities aggregate without grouping by event", () => {
   const sql = aiHomepageDailySql(window, [
     { aiCategory: "general", aiAction: "experience-loading" },
-    { aiCategory: "shell", aiAction: "generic-analytic", aiEvent: "O'Brien" },
   ]);
-  expect(sql).toContain("TO_CHAR(TRY_TO_TIMESTAMP(dimensions:timestamp::VARCHAR)::DATE, 'YYYY-MM-DD')");
-  expect(sql).toContain("(category, action) IN (('general','experience-loading'))");
-  expect(sql).toContain("(category, action) IN (('shell','generic-analytic'))");
-  expect(sql).toContain("dimensions:event::VARCHAR = 'O''Brien'");
-  expect(sql).toContain(" OR ");
+  expect(sql).toContain("NULL AS ev");
+  expect(sql).toContain("GROUP BY 1, 2, 4");
+  expect(sql).not.toContain("GROUP BY 1, 2, 3, 4");
 });
 
 test("aiHomepageDailySql with empty identities uses AND FALSE", () => {
@@ -200,7 +204,7 @@ test("refreshHomepageData volume SQL is bounded to mapped names and identities",
   );
   expect(ampVolume).toContain("'About Workiva'");
   expect(ampVolume).toContain("'Shell Generic Analytic'");
-  expect(aiVolume).toContain("dimensions:event::VARCHAR = 'aboutWorkiva'");
+  expect(aiVolume).toContain("dimensions:event::VARCHAR IN ('aboutWorkiva')");
   expect(aiVolume).toContain("NOT IN ('aboutWorkiva')");
 });
 

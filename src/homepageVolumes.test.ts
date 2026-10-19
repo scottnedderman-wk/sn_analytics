@@ -39,6 +39,29 @@ test("identityFromLegacy maps named shell dual-writes", () => {
     aiEvent: "aboutWorkiva",
   });
   expect(identityFromLegacy(["SaveEventV1"])).toBeNull();
+  expect(identityFromLegacy(["ShellGenericAnalyticEventV2"])).toBeNull();
+});
+
+test("identityFromLegacy maps kebab eventName tokens", () => {
+  expect(identityFromLegacy(["DatatableExportEventV6", "datatable_export_v6"])).toEqual({
+    aiCategory: "datatable",
+    aiAction: "export",
+  });
+  expect(identityFromLegacy(["graphDb_data-modify-relationship_v1 (add)"])).toEqual({
+    aiCategory: "graphDb",
+    aiAction: "data-modify-relationship",
+  });
+});
+
+test("identityFromLegacy maps generated EventV class names", () => {
+  expect(identityFromLegacy(["OutlineAddNewNodeEventV1"])).toEqual({
+    aiCategory: "outline",
+    aiAction: "add-new-node",
+  });
+  expect(identityFromLegacy(["`FilingLiveFileAcknowledgementClickedEventV1`"])).toEqual({
+    aiCategory: "filing",
+    aiAction: "live-file-acknowledgement-clicked",
+  });
 });
 
 test("seedAiIdentities copies contracts and named shell tokens", () => {
@@ -100,7 +123,10 @@ test("seedAiIdentities does not copy wdesk_sdk contracts onto other repos", () =
     ],
   };
   const seeded = seedAiIdentities(data);
-  expect(seeded.repos[0]!.events[0]!.aiCategory).toBeUndefined();
+  const ev = seeded.repos[0]!.events[0]!;
+  expect(ev.aiCategory).toBe("workspace");
+  expect(ev.aiAction).toBe("create");
+  expect(ev.aiEvent).toBeUndefined();
 });
 
 test("aiCountForEvent matches named, dedicated, and remainder cells without overlap", () => {

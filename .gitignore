@@ -5,6 +5,7 @@ node_modules
 out
 dist
 *.tgz
+generated
 
 # code coverage
 coverage
@@ -44,6 +45,7 @@ data/
 infra/.instance
 
 tmp/
+.tmp/
 
 # local git worktrees
 .worktrees/

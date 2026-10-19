@@ -1,5 +1,6 @@
 import { statusAfterVolume } from "./amplitudeRefresh";
 import { contractFor, INGEST_LAG_DAYS, ymdUtc } from "./eventCompare";
+import classIdentities from "./aiClassIdentities.json" with { type: "json" };
 import { topLiveByVolume, type DashboardData, type MigrationEvent } from "./model";
 
 export const HOMEPAGE_VOLUME_DAYS = 30;
@@ -14,17 +15,60 @@ export function homepageDayWindow(now = new Date()): { start: string; end: strin
 
 export type AiCell = { category: string; action: string; event: string | null; count: number };
 
+export type ClassIdentityCatalog = Record<string, { aiCategory: string; aiAction: string }>;
+
+const KEBAB_EVENT_NAME = /^([A-Za-z][A-Za-z0-9-]*)_(.+)_v\d+$/;
+const CLASS_NAME = /\b([A-Za-z][A-Za-z0-9]*EventV\d+)\b/;
+const SHELL_GENERIC_CLASS = "ShellGenericAnalyticEventV2";
+
 function isCamelToken(s: string): boolean {
   return /^[a-z][A-Za-z0-9]*$/.test(s);
 }
 
+function stripLegacyToken(s: string): string {
+  return s.replace(/`/g, "").replace(/\s*\(.*\)\s*$/, "").trim();
+}
+
+function kebabIdentity(
+  legacy: string[],
+): Pick<MigrationEvent, "aiCategory" | "aiAction"> | null {
+  for (const raw of legacy) {
+    const match = stripLegacyToken(raw).match(KEBAB_EVENT_NAME);
+    if (match) return { aiCategory: match[1]!, aiAction: match[2]! };
+  }
+  return null;
+}
+
+function catalogIdentity(
+  legacy: string[],
+  catalog: ClassIdentityCatalog,
+): Pick<MigrationEvent, "aiCategory" | "aiAction"> | null {
+  for (const raw of legacy) {
+    const match = stripLegacyToken(raw).match(CLASS_NAME);
+    if (!match) continue;
+    const className = match[1]!;
+    if (className === SHELL_GENERIC_CLASS) continue;
+    const hit = catalog[className];
+    if (hit) return { aiCategory: hit.aiCategory, aiAction: hit.aiAction };
+  }
+  return null;
+}
+
 export function identityFromLegacy(
   legacy: string[],
+  catalog: ClassIdentityCatalog = classIdentities,
 ): Pick<MigrationEvent, "aiCategory" | "aiAction" | "aiEvent"> | null {
-  if (!legacy.includes("ShellGenericAnalyticEventV2")) return null;
-  const token = legacy.find((l) => l !== "ShellGenericAnalyticEventV2" && isCamelToken(l));
-  if (!token) return null;
-  return { aiCategory: "shell", aiAction: "generic-analytic", aiEvent: token };
+  if (legacy.includes(SHELL_GENERIC_CLASS)) {
+    const token = legacy.find((l) => l !== SHELL_GENERIC_CLASS && isCamelToken(stripLegacyToken(l)));
+    if (token) {
+      return {
+        aiCategory: "shell",
+        aiAction: "generic-analytic",
+        aiEvent: stripLegacyToken(token),
+      };
+    }
+  }
+  return kebabIdentity(legacy) ?? catalogIdentity(legacy, catalog);
 }
 
 export function seedAiIdentities(data: DashboardData): DashboardData {

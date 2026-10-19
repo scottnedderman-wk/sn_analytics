@@ -16,5 +16,7 @@ test("admin_client Create Workspace does not carry wdesk_sdk shell identity", as
   const data = (await Bun.file(new URL("./data.json", import.meta.url)).json()) as DashboardData;
   const admin = data.repos.find((r) => r.repo === "admin_client")!;
   const createWorkspace = admin.events.find((e) => e.name === "Create Workspace")!;
-  expect(createWorkspace.aiCategory).toBeUndefined();
+  expect(createWorkspace.aiCategory).toBe("workspace");
+  expect(createWorkspace.aiAction).toBe("create");
+  expect(createWorkspace.aiEvent).toBeUndefined();
 });

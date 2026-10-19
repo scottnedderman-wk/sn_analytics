@@ -41,18 +41,44 @@ function uniqueIdentities(identities: HomepageAiIdentity[]): HomepageAiIdentity[
   ];
 }
 
-function aiIdentityPredicate(identity: HomepageAiIdentity): string {
-  const pair = `(category, action) IN ((${sqlString(identity.aiCategory)},${sqlString(identity.aiAction)}))`;
-  if (identity.aiEvent) {
-    return `(${pair} AND dimensions:event::VARCHAR = ${sqlString(identity.aiEvent)})`;
+function pairIn(identities: HomepageAiIdentity[]): string {
+  const pairs = [
+    ...new Map(
+      identities.map((identity) => [
+        `${identity.aiCategory}\0${identity.aiAction}`,
+        `(${sqlString(identity.aiCategory)},${sqlString(identity.aiAction)})`,
+      ]),
+    ).values(),
+  ];
+  return `(category, action) IN (${pairs.join(",")})`;
+}
+
+function namedEventPredicate(identities: HomepageAiIdentity[]): string {
+  const byPair = new Map<string, { category: string; action: string; events: string[] }>();
+  for (const identity of identities) {
+    if (!identity.aiEvent) continue;
+    const key = `${identity.aiCategory}\0${identity.aiAction}`;
+    const group = byPair.get(key) ?? {
+      category: identity.aiCategory,
+      action: identity.aiAction,
+      events: [],
+    };
+    group.events.push(identity.aiEvent);
+    byPair.set(key, group);
   }
-  if (identity.aiEventExclude?.length) {
-    return `(${pair} AND dimensions:event::VARCHAR NOT IN (${identity.aiEventExclude.map(sqlString).join(",")})
+  return [...byPair.values()]
+    .map(
+      (group) =>
+        `(${pairIn([{ aiCategory: group.category, aiAction: group.action }])} AND dimensions:event::VARCHAR IN (${group.events.map(sqlString).join(",")}))`,
+    )
+    .join(" OR ");
+}
+
+function remainderPredicate(identity: HomepageAiIdentity): string {
+  return `(${pairIn([identity])} AND dimensions:event::VARCHAR NOT IN (${(identity.aiEventExclude ?? []).map(sqlString).join(",")})
   AND dimensions:event::VARCHAR NOT LIKE 'progressItem.%'
   AND dimensions:event::VARCHAR NOT LIKE 'notificationItem.%'
   AND dimensions:event::VARCHAR NOT LIKE 'createMenuItem.%')`;
-  }
-  return pair;
 }
 
 function aiFromWhere(window: { start: string; end: string }): string {
@@ -97,19 +123,26 @@ ${aiFromWhere(window)}
   AND FALSE
 GROUP BY 1, 2, 3`;
   }
-  const named = unique.filter((identity) => !identity.aiEventExclude?.length);
+  const dedicated = unique.filter((identity) => !identity.aiEvent && !identity.aiEventExclude?.length);
+  const named = unique.filter((identity) => identity.aiEvent);
   const remainders = unique.filter((identity) => identity.aiEventExclude?.length);
   const parts: string[] = [];
+  if (dedicated.length) {
+    parts.push(`SELECT category, action, NULL AS ev, COUNT(*) AS event_count
+${aiFromWhere(window)}
+  AND ${pairIn(dedicated)}
+GROUP BY 1, 2`);
+  }
   if (named.length) {
     parts.push(`SELECT category, action, dimensions:event::VARCHAR AS ev, COUNT(*) AS event_count
 ${aiFromWhere(window)}
-  AND (${named.map(aiIdentityPredicate).join(" OR ")})
+  AND (${namedEventPredicate(named)})
 GROUP BY 1, 2, 3`);
   }
   if (remainders.length) {
     parts.push(`SELECT category, action, NULL AS ev, COUNT(*) AS event_count
 ${aiFromWhere(window)}
-  AND (${remainders.map(aiIdentityPredicate).join(" OR ")})
+  AND (${remainders.map(remainderPredicate).join(" OR ")})
 GROUP BY 1, 2`);
   }
   return parts.join("\nUNION ALL\n");
@@ -140,21 +173,29 @@ ${aiFromWhere(window)}
 GROUP BY 1, 2, 3, 4
 ORDER BY 4`;
   }
-  const named = unique.filter((identity) => !identity.aiEventExclude?.length);
+  const dedicated = unique.filter((identity) => !identity.aiEvent && !identity.aiEventExclude?.length);
+  const named = unique.filter((identity) => identity.aiEvent);
   const remainders = unique.filter((identity) => identity.aiEventExclude?.length);
   const parts: string[] = [];
+  if (dedicated.length) {
+    parts.push(`SELECT category, action, NULL AS ev,
+  ${dateExpr}, COUNT(*) AS event_count
+${aiFromWhere(window)}
+  AND ${pairIn(dedicated)}
+GROUP BY 1, 2, 4`);
+  }
   if (named.length) {
     parts.push(`SELECT category, action, dimensions:event::VARCHAR AS ev,
   ${dateExpr}, COUNT(*) AS event_count
 ${aiFromWhere(window)}
-  AND (${named.map(aiIdentityPredicate).join(" OR ")})
+  AND (${namedEventPredicate(named)})
 GROUP BY 1, 2, 3, 4`);
   }
   if (remainders.length) {
     parts.push(`SELECT category, action, NULL AS ev,
   ${dateExpr}, COUNT(*) AS event_count
 ${aiFromWhere(window)}
-  AND (${remainders.map(aiIdentityPredicate).join(" OR ")})
+  AND (${remainders.map(remainderPredicate).join(" OR ")})
 GROUP BY 1, 2, 4`);
   }
   return `${parts.join("\nUNION ALL\n")}
