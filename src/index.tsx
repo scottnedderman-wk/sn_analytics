@@ -1,9 +1,11 @@
 import { serve } from "bun";
+import { compareRoutes } from "@/api/compare";
+import { helloRoutes } from "@/api/hello";
+import { homepageRoutes } from "@/api/homepage";
+import { dataJsonUrl } from "@/lib/dataPath";
+import { openAppDatabase, sqlitePathFromEnv } from "@/lib/db";
+import { listenPort, SERVE_IDLE_TIMEOUT_SECONDS } from "@/lib/port";
 import index from "./index.html";
-import { openAppDatabase, sqlitePathFromEnv } from "./db";
-import { compareRoutes } from "./eventCompareApi";
-import { homepageRoutes } from "./homepageApi";
-import { listenPort, SERVE_IDLE_TIMEOUT_SECONDS } from "./port";
 
 const db = openAppDatabase(sqlitePathFromEnv());
 
@@ -12,35 +14,14 @@ const server = serve({
   idleTimeout: SERVE_IDLE_TIMEOUT_SECONDS,
   routes: {
     "/data.json": () =>
-      new Response(Bun.file(new URL("./data.json", import.meta.url)), {
+      new Response(Bun.file(dataJsonUrl), {
         headers: { "Content-Type": "application/json; charset=utf-8" },
       }),
 
     // Serve index.html for all unmatched routes.
     "/*": index,
 
-    "/api/hello": {
-      async GET(req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "GET",
-        });
-      },
-      async PUT(req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "PUT",
-        });
-      },
-    },
-
-    "/api/hello/:name": async req => {
-      const name = req.params.name;
-      return Response.json({
-        message: `Hello, ${name}!`,
-      });
-    },
-
+    ...helloRoutes(),
     ...compareRoutes(db),
     ...homepageRoutes(),
   },

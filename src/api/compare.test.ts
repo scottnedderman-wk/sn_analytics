@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openAppDatabase } from "./db";
-import { GEL_CONTRACT, type CompareSnapshot } from "./eventCompare";
-import { pendingSnapshot, putCompareCache } from "./eventCompareCache";
-import { compareGetResponse, compareRoutes, decodeRouteParam } from "./eventCompareApi";
-import type { FetchImpl } from "./snowflakeEvents";
+import { openAppDatabase } from "@/lib/db";
+import { GEL_CONTRACT, type CompareSnapshot } from "@/lib/eventCompare";
+import { pendingSnapshot, putCompareCache } from "@/lib/eventCompareCache";
+import type { FetchImpl } from "@/lib/snowflakeEvents";
+import { compareGetResponse, compareRoutes, decodeRouteParam } from "./compare";
 
 function tmpDb() {
   const dir = mkdtempSync(join(tmpdir(), "sn-analytics-"));

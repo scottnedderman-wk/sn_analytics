@@ -6,7 +6,7 @@ import {
   formatSession,
   parseArgs,
   sessionInfo,
-} from "../src/snowflakeEvents";
+} from "../src/lib/snowflakeEvents";
 
 try {
   parseArgs(Bun.argv);

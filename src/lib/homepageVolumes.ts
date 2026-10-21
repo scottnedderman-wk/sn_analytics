@@ -1,16 +1,31 @@
 import { statusAfterVolume } from "./amplitudeRefresh";
 import { contractFor, INGEST_LAG_DAYS, ymdUtc } from "./eventCompare";
-import classIdentities from "./aiClassIdentities.json" with { type: "json" };
+import classIdentities from "../data/aiClassIdentities.json" with { type: "json" };
 import { topLiveByVolume, type DashboardData, type MigrationEvent } from "./model";
 
 export const HOMEPAGE_VOLUME_DAYS = 30;
 
+export function windowEndingOn(end: string, days: number): { start: string; end: string } {
+  const last = new Date(`${end}T00:00:00Z`);
+  const first = new Date(last);
+  first.setUTCDate(first.getUTCDate() - (days - 1));
+  return { start: ymdUtc(first), end };
+}
+
 export function homepageDayWindow(now = new Date()): { start: string; end: string } {
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   end.setUTCDate(end.getUTCDate() - INGEST_LAG_DAYS);
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - (HOMEPAGE_VOLUME_DAYS - 1));
-  return { start: ymdUtc(start), end: ymdUtc(end) };
+  return windowEndingOn(ymdUtc(end), HOMEPAGE_VOLUME_DAYS);
+}
+
+export function dashboardVolumeWindow(
+  data: Pick<DashboardData, "volumeAsOf" | "volumeWindowDays">,
+  now = new Date(),
+): { start: string; end: string } {
+  if (data.volumeAsOf) {
+    return windowEndingOn(data.volumeAsOf, data.volumeWindowDays ?? HOMEPAGE_VOLUME_DAYS);
+  }
+  return homepageDayWindow(now);
 }
 
 export type AiCell = { category: string; action: string; event: string | null; count: number };

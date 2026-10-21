@@ -1,13 +1,14 @@
 import { expect, test } from "bun:test";
 import { renderToString } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import {
   AppDetail,
   EventRow,
   isRefreshAllDisabled,
   isRefreshBusy,
 } from "./AppDetail";
-import { contractsForRepo } from "./eventCompare";
-import type { MigrationEvent, RepoRecord } from "./model";
+import { contractsForRepo } from "@/lib/eventCompare";
+import type { MigrationEvent, RepoRecord } from "@/lib/model";
 
 const event = (over: Partial<MigrationEvent> = {}): MigrationEvent => ({
   name: "Clicked Save",
@@ -102,12 +103,18 @@ test("Refresh all is disabled when the repo has no contracts", () => {
   expect(isRefreshAllDisabled("wdesk_sdk", false)).toBe(false);
   expect(isRefreshAllDisabled("wdesk_sdk", true)).toBe(true);
 
-  const none = renderToString(<AppDetail repo={repo()} onTip={() => {}} />);
+  const none = renderToString(
+    <MemoryRouter>
+      <AppDetail repo={repo()} onTip={() => {}} />
+    </MemoryRouter>,
+  );
   const sdk = renderToString(
-    <AppDetail
-      repo={repo({ repo: "wdesk_sdk", events: [gel], counts: { live: 1 }, total: 1, live: 1 })}
-      onTip={() => {}}
-    />,
+    <MemoryRouter>
+      <AppDetail
+        repo={repo({ repo: "wdesk_sdk", events: [gel], counts: { live: 1 }, total: 1, live: 1 })}
+        onTip={() => {}}
+      />
+    </MemoryRouter>,
   );
   expect(hasDisabledAttr(refreshAllButtonHtml(none))).toBe(true);
   expect(hasDisabledAttr(refreshAllButtonHtml(sdk))).toBe(false);

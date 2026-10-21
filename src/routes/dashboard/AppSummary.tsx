@@ -1,5 +1,5 @@
-import { appHref, fmt, sparklinePath, topLiveByVolume, type RepoRecord } from "./model";
-import { Highlight, InternalLink } from "./ui";
+import { Highlight, InternalLink } from "@/components/ui";
+import { appHref, fmt, sparklinePath, topLiveByVolume, type RepoRecord } from "@/lib/model";
 
 function Sparkline({ values }: { values: number[] }) {
   const width = 72;

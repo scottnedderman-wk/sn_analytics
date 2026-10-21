@@ -15,7 +15,7 @@ import {
   visibleRepos,
   type MigrationEvent,
   type RepoRecord,
-} from "./App";
+} from "./model";
 
 const event = (over: Partial<MigrationEvent> = {}): MigrationEvent => ({
   name: "Clicked Save",

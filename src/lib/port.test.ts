@@ -11,6 +11,6 @@ test("reads PORT", () => {
 
 test("disables Bun idleTimeout so Snowflake refresh is not reset as Failed to fetch", async () => {
   expect(SERVE_IDLE_TIMEOUT_SECONDS).toBe(0);
-  const src = await Bun.file(new URL("./index.tsx", import.meta.url)).text();
+  const src = await Bun.file(new URL("../index.tsx", import.meta.url)).text();
   expect(src).toContain("idleTimeout: SERVE_IDLE_TIMEOUT_SECONDS");
 });

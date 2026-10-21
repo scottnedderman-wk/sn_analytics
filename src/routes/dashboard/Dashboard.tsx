@@ -13,8 +13,8 @@ import {
   type RepoRecord,
   type SortBy,
   type StatusFilter,
-} from "./model";
-import { Highlight, InternalLink, MagnifyIcon, Meter, ThemeToggle, UnassessableNote } from "./ui";
+} from "@/lib/model";
+import { Highlight, InternalLink, MagnifyIcon, Meter, UnassessableNote } from "@/components/ui";
 
 function RepoCard({
   repo: r,
@@ -119,15 +119,11 @@ function RepoCard({
 export function Dashboard({
   data,
   onData,
-  theme,
-  onToggleTheme,
   onTip,
   now = () => new Date(),
 }: {
   data: DashboardData;
   onData: (data: DashboardData) => void;
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
   onTip: (text: string | null, e?: MouseEvent) => void;
   now?: Date | (() => Date);
 }) {
@@ -181,14 +177,11 @@ export function Dashboard({
 
   return (
     <>
-      <header className="flex items-start justify-between gap-4 mb-1">
-        <div>
-          <h1 className="text-[21px] font-bold tracking-tight">Analytics Migration Status</h1>
-          <p className="txt-2 text-[12.5px] mt-1">
-            Legacy <code className="txt-3">user_analytics</code> → Amplitude · per application
-          </p>
-        </div>
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      <header className="mb-1">
+        <h1 className="text-[21px] font-bold tracking-tight">Analytics Migration Status</h1>
+        <p className="txt-2 text-[12.5px] mt-1">
+          Legacy <code className="txt-3">user_analytics</code> → Amplitude · per application
+        </p>
       </header>
       <div className="mb-6">
         <p className="txt-3 text-[11.5px]">

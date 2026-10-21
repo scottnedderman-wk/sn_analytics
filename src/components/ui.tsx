@@ -1,5 +1,6 @@
 import { type MouseEvent, type ReactNode } from "react";
-import { type EventStatus } from "./model";
+import { Link } from "react-router";
+import { type EventStatus } from "@/lib/model";
 
 export const META: Record<EventStatus, { label: string; icon: string; color: string; ink: string }> = {
   live: { label: "Live", icon: "✓", color: "var(--st-good)", ink: "var(--st-good-ink)" },
@@ -68,11 +69,6 @@ export function Meter({
   );
 }
 
-export function navigate(href: string) {
-  history.pushState({}, "", href);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
-
 export function InternalLink({
   href,
   children,
@@ -87,19 +83,9 @@ export function InternalLink({
   onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   return (
-    <a
-      href={href}
-      className={className}
-      aria-label={ariaLabel}
-      onClick={(e) => {
-        onClick?.(e);
-        if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-        e.preventDefault();
-        navigate(href);
-      }}
-    >
+    <Link to={href} className={className} aria-label={ariaLabel} onClick={onClick}>
       {children}
-    </a>
+    </Link>
   );
 }
 

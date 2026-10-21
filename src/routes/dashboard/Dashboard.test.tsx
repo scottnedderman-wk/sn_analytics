@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { renderToString } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { Dashboard } from "./Dashboard";
-import type { DashboardData } from "./model";
+import type { DashboardData } from "@/lib/model";
 
 const data: DashboardData = {
   provenance: "mapping",
@@ -40,14 +41,9 @@ const data: DashboardData = {
 
 test("homepage shows Refresh, Updated copy, and Amp vs AI card totals", () => {
   const html = renderToString(
-    <Dashboard
-      data={data}
-      onData={() => {}}
-      theme="light"
-      onToggleTheme={() => {}}
-      onTip={() => {}}
-      now={new Date("2026-09-16T18:00:00Z")}
-    />,
+    <MemoryRouter>
+      <Dashboard data={data} onData={() => {}} onTip={() => {}} now={new Date("2026-09-16T18:00:00Z")} />
+    </MemoryRouter>,
   );
   expect(html).toContain("Refresh");
   expect(html).toContain("Updated 3 days ago");

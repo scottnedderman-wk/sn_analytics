@@ -1,7 +1,8 @@
-import { seedAiIdentities } from "../src/homepageVolumes";
-import type { DashboardData } from "../src/model";
+import { dataJsonUrl } from "../src/lib/dataPath";
+import { seedAiIdentities } from "../src/lib/homepageVolumes";
+import type { DashboardData } from "../src/lib/model";
 
-const dataPath = new URL("../src/data.json", import.meta.url);
+const dataPath = dataJsonUrl;
 const data = (await Bun.file(dataPath).json()) as DashboardData;
 // Re-seeding replaces contract/legacy identities and removes any other identities.
 await Bun.write(dataPath, JSON.stringify(seedAiIdentities(data), null, 2) + "\n");

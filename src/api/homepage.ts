@@ -1,7 +1,7 @@
 import {
   refreshHomepageData,
   type HomepageRefreshDeps,
-} from "./homepageRefresh";
+} from "@/lib/homepageRefresh";
 
 export function homepageRoutes(deps?: HomepageRefreshDeps) {
   return {

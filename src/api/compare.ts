@@ -1,8 +1,8 @@
 import type { Database } from "bun:sqlite";
-import { compareRowFromCache, type CompareRow } from "./eventCompare";
-import { listCompareCache } from "./eventCompareCache";
-import { refreshEventCompare, refreshRepoCompares, type RefreshDeps } from "./eventCompareRefresh";
-import { credsFromEnv, type SnowflakeCreds } from "./snowflakeEvents";
+import { compareRowFromCache, type CompareRow } from "@/lib/eventCompare";
+import { listCompareCache } from "@/lib/eventCompareCache";
+import { refreshEventCompare, refreshRepoCompares, type RefreshDeps } from "@/lib/eventCompareRefresh";
+import { credsFromEnv, type SnowflakeCreds } from "@/lib/snowflakeEvents";
 
 export type CompareRouteDeps = RefreshDeps & {
   credsFromEnv?: () => SnowflakeCreds;

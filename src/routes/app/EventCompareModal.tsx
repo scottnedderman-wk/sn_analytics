@@ -5,8 +5,8 @@ import {
   type CompareRow,
   type ContractField,
   type SnapshotField,
-} from "./eventCompare";
-import { pctColor } from "./model";
+} from "@/lib/eventCompare";
+import { pctColor } from "@/lib/model";
 
 function scoreChip(n: number | null): string {
   return n == null ? "pending" : `${n}%`;

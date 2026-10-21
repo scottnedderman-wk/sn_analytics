@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderToString } from "react-dom/server";
-import { compareRowFromCache, compareRowFromContract } from "./eventCompare";
+import { compareRowFromCache, compareRowFromContract } from "@/lib/eventCompare";
 import { EventCompareModal } from "./EventCompareModal";
 
 test("GEL modal lists comparable fields and omitted note", () => {

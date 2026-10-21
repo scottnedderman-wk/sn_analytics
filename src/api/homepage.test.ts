@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { homepageRoutes } from "./homepageApi";
-import type { DashboardData } from "./model";
+import type { DashboardData } from "@/lib/model";
+import { homepageRoutes } from "./homepage";
 
 test("POST /api/homepage/refresh returns data on success and 500 without write on error", async () => {
   const seed: DashboardData = { provenance: "t", repos: [] };

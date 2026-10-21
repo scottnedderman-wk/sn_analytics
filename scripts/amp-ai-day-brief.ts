@@ -1,4 +1,5 @@
-import { topLiveByVolume, type DashboardData } from "../src/model";
+import { dataJsonUrl } from "../src/lib/dataPath";
+import { topLiveByVolume, type DashboardData } from "../src/lib/model";
 
 const DAY = "2026-09-09";
 const DAY_LABEL = "September 9, 2026";
@@ -6,7 +7,7 @@ const DAY_SHORT = "9/9/2026";
 const htmlPath = new URL("../.tmp/amp-ai-day-brief.html", import.meta.url);
 const pdfPath = new URL("../docs/amp-vs-app-intel-top5-2026-09-09.pdf", import.meta.url);
 
-const data = (await Bun.file(new URL("../src/data.json", import.meta.url)).json()) as DashboardData;
+const data = (await Bun.file(dataJsonUrl).json()) as DashboardData;
 const days = data.volumeWindowDays ?? 30;
 const asOf = data.volumeAsOf;
 if (!asOf) throw new Error("data.json is missing volumeAsOf");

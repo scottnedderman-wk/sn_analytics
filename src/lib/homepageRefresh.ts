@@ -1,3 +1,4 @@
+import { dataJsonUrl } from "./dataPath";
 import { topLiveByVolume, type DashboardData, type MigrationEvent } from "./model";
 import {
   aiCountForEvent,
@@ -211,7 +212,7 @@ export type HomepageRefreshDeps = {
   now?: () => Date;
 };
 
-const dataUrl = new URL("./data.json", import.meta.url);
+const dataUrl = dataJsonUrl;
 
 export async function readDashboardFile(): Promise<DashboardData> {
   return (await Bun.file(dataUrl).json()) as DashboardData;

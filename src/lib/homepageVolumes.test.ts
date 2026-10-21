@@ -3,6 +3,7 @@ import { contractFor } from "./eventCompare";
 import {
   aiCountForEvent,
   applyHomepageVolumes,
+  dashboardVolumeWindow,
   homepageDayWindow,
   identityFromLegacy,
   seedAiIdentities,
@@ -12,6 +13,20 @@ import type { DashboardData, MigrationEvent } from "./model";
 
 test("homepageDayWindow is 30 UTC days ending 2 days ago", () => {
   expect(homepageDayWindow(new Date("2026-08-26T16:00:00Z"))).toEqual({
+    start: "2026-07-26",
+    end: "2026-08-24",
+  });
+});
+
+test("dashboardVolumeWindow uses stored as-of and length", () => {
+  expect(dashboardVolumeWindow({ volumeAsOf: "2026-09-13", volumeWindowDays: 30 })).toEqual({
+    start: "2026-08-15",
+    end: "2026-09-13",
+  });
+});
+
+test("dashboardVolumeWindow falls back to lagged 30d when as-of is missing", () => {
+  expect(dashboardVolumeWindow({}, new Date("2026-08-26T16:00:00Z"))).toEqual({
     start: "2026-07-26",
     end: "2026-08-24",
   });

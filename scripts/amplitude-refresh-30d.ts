@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
-import { credsFromEnv, refreshProduction30d, type DashboardData } from "../src/amplitudeRefresh";
+import { dataJsonUrl } from "../src/lib/dataPath";
+import { credsFromEnv, refreshProduction30d, type DashboardData } from "../src/lib/amplitudeRefresh";
 
-const dataPath = new URL("../src/data.json", import.meta.url);
+const dataPath = dataJsonUrl;
 
 const data = (await Bun.file(dataPath).json()) as DashboardData;
 const before = data.repos.reduce((s, r) => s + (r.counts.live || 0), 0);

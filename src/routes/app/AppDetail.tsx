@@ -5,8 +5,7 @@ import {
   contractsForRepo,
   formatScoreTitle,
   type CompareRow,
-} from "./eventCompare";
-import { EventCompareModal } from "./EventCompareModal";
+} from "@/lib/eventCompare";
 import {
   fmt,
   githubRepoUrl,
@@ -16,8 +15,9 @@ import {
   sortEvents,
   type MigrationEvent,
   type RepoRecord,
-} from "./model";
-import { Badge, Highlight, InternalLink, MagnifyIcon, Meter, RefreshIcon, UnassessableNote } from "./ui";
+} from "@/lib/model";
+import { Badge, Highlight, InternalLink, MagnifyIcon, Meter, RefreshIcon, UnassessableNote } from "@/components/ui";
+import { EventCompareModal } from "./EventCompareModal";
 
 async function postRefresh(url: string): Promise<CompareRow[]> {
   const res = await fetch(url, { method: "POST" });

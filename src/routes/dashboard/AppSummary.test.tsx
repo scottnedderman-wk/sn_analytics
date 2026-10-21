@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
+import { type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { AppSummary } from "./AppSummary";
-import type { MigrationEvent, RepoRecord } from "./model";
+import type { MigrationEvent, RepoRecord } from "@/lib/model";
+
+function renderSummary(node: ReactNode): string {
+  return renderToString(<MemoryRouter>{node}</MemoryRouter>);
+}
 
 const ev: MigrationEvent = {
   name: "General Experience Loading",
@@ -35,7 +41,7 @@ const repo: RepoRecord = {
 };
 
 test("AppSummary groups Amplitude and App Intel last-30d columns", () => {
-  const html = renderToString(<AppSummary repo={repo} query="" />);
+  const html = renderSummary(<AppSummary repo={repo} query="" />);
   expect(html).toContain("Amplitude");
   expect(html).toContain("App Intel");
   expect(html).toContain("Last 30d");
@@ -77,7 +83,7 @@ function repoOf(events: MigrationEvent[], over: Partial<RepoRecord> = {}): RepoR
 }
 
 test("AppSummary renders em dash when ai30 is null, not fmt(0)", () => {
-  const html = renderToString(
+  const html = renderSummary(
     <AppSummary repo={repoOf([event({ ai30: null })])} query="" />,
   );
   expect(html).toContain("—");
@@ -85,7 +91,7 @@ test("AppSummary renders em dash when ai30 is null, not fmt(0)", () => {
 });
 
 test("AppSummary still ranks live events by Amplitude volume", () => {
-  const html = renderToString(
+  const html = renderSummary(
     <AppSummary
       repo={repoOf([
         event({ name: "High AI", v30: 10, ai30: 9000 }),
@@ -102,7 +108,7 @@ test("AppSummary still ranks live events by Amplitude volume", () => {
 });
 
 test("AppSummary omits Last 30d columns when neither series is long enough", () => {
-  const html = renderToString(
+  const html = renderSummary(
     <AppSummary repo={repoOf([event({ series30: [1], aiSeries30: [1], ai30: 1100 })])} query="" />,
   );
   expect(html).toContain("Amplitude");
