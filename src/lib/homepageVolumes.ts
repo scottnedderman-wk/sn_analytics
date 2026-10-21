@@ -1,7 +1,9 @@
 import { statusAfterVolume } from "./amplitudeRefresh";
 import { contractFor, INGEST_LAG_DAYS, ymdUtc } from "./eventCompare";
 import classIdentities from "../data/aiClassIdentities.json" with { type: "json" };
-import { topLiveByVolume, type DashboardData, type MigrationEvent } from "./model";
+import type { VolumeDailyRow } from "./eventVolumeCache";
+import { topLiveByVolume, type DashboardData, type EventStatus, type MigrationEvent } from "./model";
+import { eachUtcDate, type DayWindow } from "./volumeWindow";
 
 export const HOMEPAGE_VOLUME_DAYS = 30;
 
@@ -183,4 +185,69 @@ export function applyHomepageVolumes(
     };
   });
   return { ...data, volumeAsOf: asOf, volumeWindowDays: 30, volumeRefreshedAt: refreshedAt, repos };
+}
+
+export function applyVolumeDaily(
+  data: DashboardData,
+  rows: VolumeDailyRow[],
+  window: DayWindow,
+  refreshedAt: string,
+): DashboardData {
+  const dates = eachUtcDate(window);
+  const byRepo = new Map<string, VolumeDailyRow[]>();
+  for (const row of rows) {
+    const list = byRepo.get(row.repo) ?? [];
+    list.push(row);
+    byRepo.set(row.repo, list);
+  }
+  const repos = data.repos.map((repo) => {
+    if (repo.events.length === 0) return repo;
+    const mine = byRepo.get(repo.repo) ?? [];
+    const events = repo.events.map((ev) => {
+      const amp = mine.filter((row) => row.source === "amp" && row.eventName === ev.name);
+      const ai = mine.filter((row) => row.source === "ai" && row.eventName === ev.name);
+      const v30 = amp.reduce((sum, row) => sum + row.count, 0);
+      const ai30 = ev.aiCategory && ev.aiAction ? ai.reduce((sum, row) => sum + row.count, 0) : null;
+      return { ...ev, v30, ai30, status: statusAfterVolume(ev, v30) };
+    });
+    const preview = new Set(topLiveByVolume(events, 5).map((event) => event.name));
+    const withSeries = events.map((ev) => {
+      const next = { ...ev };
+      if (preview.has(ev.name)) {
+        const amp = mine.filter((row) => row.source === "amp" && row.eventName === ev.name);
+        const ai = mine.filter((row) => row.source === "ai" && row.eventName === ev.name);
+        next.series30 = dates.map((day) => amp.find((row) => row.day === day)?.count ?? 0);
+        if (ev.ai30 != null) next.aiSeries30 = dates.map((day) => ai.find((row) => row.day === day)?.count ?? 0);
+        else delete next.aiSeries30;
+      } else {
+        delete next.series30;
+        delete next.aiSeries30;
+      }
+      return next;
+    });
+    let volume30 = 0;
+    let volume30Ai = 0;
+    const counts: Partial<Record<EventStatus, number>> = {};
+    for (const event of withSeries) {
+      counts[event.status] = (counts[event.status] || 0) + 1;
+      volume30 += event.v30 || 0;
+      if (event.ai30 != null) volume30Ai += event.ai30;
+    }
+    return {
+      ...repo,
+      events: withSeries,
+      counts,
+      volume30,
+      volume30Ai,
+      live: counts.live || 0,
+      total: withSeries.length,
+    };
+  });
+  return {
+    ...data,
+    volumeAsOf: window.end,
+    volumeWindowDays: dates.length,
+    volumeRefreshedAt: refreshedAt,
+    repos,
+  };
 }

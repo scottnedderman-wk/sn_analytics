@@ -56,7 +56,9 @@ test("home and app routes share the date window header", () => {
     expect(html).toContain('value="2026-08-17"');
     expect(html).toContain('value="2026-08-18"');
   }
-  expect(home).toContain("Analytics Migration Status");
+  expect(home).toContain(">Analytics Migration</h1>");
+  expect(home).not.toContain("user_analytics");
+  expect(app).toContain(">Analytics Migration</h1>");
   expect(app).toContain("wdesk_sdk");
   expect(app).toContain("All applications");
 });

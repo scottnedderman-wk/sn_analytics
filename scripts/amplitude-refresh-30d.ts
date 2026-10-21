@@ -1,17 +1,21 @@
 #!/usr/bin/env bun
-import { dataJsonUrl } from "../src/lib/dataPath";
-import { credsFromEnv, refreshProduction30d, type DashboardData } from "../src/lib/amplitudeRefresh";
+import { openAppDatabase, sqlitePathFromEnv } from "../src/lib/db";
+import { refreshHomepageData } from "../src/lib/homepageRefresh";
+import { homepageDayWindow } from "../src/lib/homepageVolumes";
 
-const dataPath = dataJsonUrl;
-
-const data = (await Bun.file(dataPath).json()) as DashboardData;
-const before = data.repos.reduce((s, r) => s + (r.counts.live || 0), 0);
-
-const updated = await refreshProduction30d(data, credsFromEnv());
-await Bun.write(dataPath, JSON.stringify(updated, null, 2) + "\n");
-
-const after = updated.repos.reduce((s, r) => s + (r.counts.live || 0), 0);
-const mapped = updated.repos.reduce((s, r) => s + r.total, 0);
-console.log(
-  `Wrote ${dataPath.pathname}\nLive: ${before} → ${after} of ${mapped} mapped events (as of ${updated.volumeAsOf})`,
-);
+const db = openAppDatabase(sqlitePathFromEnv());
+try {
+  const window = homepageDayWindow();
+  const data = await refreshHomepageData({
+    db,
+    window,
+    onProgress: (progress) => {
+      console.log(`${progress.completed}/${progress.total} ${progress.message}`);
+    },
+  });
+  console.log(
+    `Cached Amplitude and App Intel daily volumes for ${window.start}..${window.end} (${data.volumeWindowDays} days)`,
+  );
+} finally {
+  db.close();
+}

@@ -1,20 +1,26 @@
 import { serve } from "bun";
 import { compareRoutes } from "@/api/compare";
+import { contributorsRoutes } from "@/api/contributors";
+import { eventAnalysisRoutes } from "@/api/eventAnalysis";
+import { eventSampleRoutes } from "@/api/eventSample";
+import { eventVolumeRoutes } from "@/api/eventVolume";
 import { helloRoutes } from "@/api/hello";
 import { homepageRoutes } from "@/api/homepage";
-import { dataJsonUrl } from "@/lib/dataPath";
+import { seedJsonUrl } from "@/lib/dataPath";
 import { openAppDatabase, sqlitePathFromEnv } from "@/lib/db";
+import { resumeHomepageRefresh } from "@/lib/homepageJob";
 import { listenPort, SERVE_IDLE_TIMEOUT_SECONDS } from "@/lib/port";
 import index from "./index.html";
 
 const db = openAppDatabase(sqlitePathFromEnv());
+resumeHomepageRefresh({ db });
 
 const server = serve({
   port: listenPort(),
   idleTimeout: SERVE_IDLE_TIMEOUT_SECONDS,
   routes: {
-    "/data.json": () =>
-      new Response(Bun.file(dataJsonUrl), {
+    "/seed.json": () =>
+      new Response(Bun.file(seedJsonUrl), {
         headers: { "Content-Type": "application/json; charset=utf-8" },
       }),
 
@@ -23,7 +29,11 @@ const server = serve({
 
     ...helloRoutes(),
     ...compareRoutes(db),
-    ...homepageRoutes(),
+    ...contributorsRoutes(db),
+    ...eventVolumeRoutes(db),
+    ...eventSampleRoutes(db),
+    ...eventAnalysisRoutes(db),
+    ...homepageRoutes({ db }),
   },
 
   development: process.env.NODE_ENV !== "production" && {

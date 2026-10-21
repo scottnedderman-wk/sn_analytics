@@ -1,5 +1,10 @@
-import { dataJsonUrl } from "../src/lib/dataPath";
-import { topLiveByVolume, type DashboardData } from "../src/lib/model";
+import { seedJsonUrl } from "../src/lib/dataPath";
+import { openAppDatabase, sqlitePathFromEnv } from "../src/lib/db";
+import { listVolumeDaily } from "../src/lib/eventVolumeCache";
+import { applyVolumeDaily, windowEndingOn } from "../src/lib/homepageVolumes";
+import { topLiveByVolume } from "../src/lib/model";
+import { hydrateSeed, type SeedData } from "../src/lib/seed";
+import { eachUtcDate } from "../src/lib/volumeWindow";
 
 const DAY = "2026-09-09";
 const DAY_LABEL = "September 9, 2026";
@@ -7,19 +12,17 @@ const DAY_SHORT = "9/9/2026";
 const htmlPath = new URL("../.tmp/amp-ai-day-brief.html", import.meta.url);
 const pdfPath = new URL("../docs/amp-vs-app-intel-top5-2026-09-09.pdf", import.meta.url);
 
-const data = (await Bun.file(dataJsonUrl).json()) as DashboardData;
-const days = data.volumeWindowDays ?? 30;
-const asOf = data.volumeAsOf;
-if (!asOf) throw new Error("data.json is missing volumeAsOf");
-
-const end = new Date(`${asOf}T00:00:00Z`);
-const start = new Date(end);
-start.setUTCDate(start.getUTCDate() - (days - 1));
-const dates = Array.from({ length: days }, (_, i) => {
-  const d = new Date(start);
-  d.setUTCDate(start.getUTCDate() + i);
-  return d.toISOString().slice(0, 10);
-});
+const window = windowEndingOn(DAY, 30);
+const db = openAppDatabase(sqlitePathFromEnv());
+const data = applyVolumeDaily(
+  hydrateSeed((await Bun.file(seedJsonUrl).json()) as SeedData),
+  listVolumeDaily(db, window),
+  window,
+  new Date().toISOString(),
+);
+db.close();
+const asOf = data.volumeAsOf ?? DAY;
+const dates = eachUtcDate(window);
 const idx = dates.indexOf(DAY);
 if (idx < 0) throw new Error(`${DAY} is not in the stored window ${dates[0]}–${dates.at(-1)}`);
 

@@ -1,11 +1,9 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import {
-  compareRowFromContract,
-  contractFor,
-  contractsForRepo,
-  formatScoreTitle,
-  type CompareRow,
-} from "@/lib/eventCompare";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useVolumeWindow } from "@/app/VolumeWindowContext";
+import { DIFF_INK, ampAiDiffPct, diffTone } from "@/routes/dashboard/AppSummary";
+import { eventVolumeSeries } from "@/lib/eventVolumeCache";
+import { explainCounts, explainEvent, explainSummary, reasonText, type DayVolume } from "@/lib/volumeExplain";
+import type { RepoContributor } from "@/lib/repoContributors";
 import {
   fmt,
   githubRepoUrl,
@@ -16,45 +14,47 @@ import {
   type MigrationEvent,
   type RepoRecord,
 } from "@/lib/model";
-import { Badge, Highlight, InternalLink, MagnifyIcon, Meter, RefreshIcon, UnassessableNote } from "@/components/ui";
+import { AnalyzeIcon, Badge, Highlight, InternalLink, MagnifyIcon, Meter, UnassessableNote } from "@/components/ui";
+import { EventAnalysisModal } from "./EventAnalysisModal";
 import { EventCompareModal } from "./EventCompareModal";
 
-async function postRefresh(url: string): Promise<CompareRow[]> {
-  const res = await fetch(url, { method: "POST" });
-  const body = (await res.json()) as { rows?: CompareRow[]; error?: string };
-  if (!res.ok) throw new Error(body.error ?? res.statusText);
-  return body.rows ?? [];
-}
-
-function overlayFor(cache: Record<string, CompareRow>, name: string): CompareRow | null {
-  return cache[name] ?? compareRowFromContract(name);
-}
-
-export function mergeRows(prev: Record<string, CompareRow>, rows: CompareRow[]): Record<string, CompareRow> {
-  const next = { ...prev };
-  for (const row of rows) next[row.eventName] = row;
-  return next;
-}
-
-function pendingCompareRow(eventName: string): CompareRow {
+export function GitHubLine({
+  repo,
+  contributors,
+}: {
+  repo: string;
+  contributors: Array<{ name: string; login: string }>;
+}) {
   return (
-    compareRowFromContract(eventName) ?? {
-      eventName,
-      snapshot: null,
-      refreshedAt: null,
-      lastError: null,
-      parts: { present: null, type: null, populated: null, volume: null },
-      match: null,
-    }
+    <p className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <a
+        href={githubRepoUrl(repo)}
+        target="_blank"
+        rel="noopener"
+        className="text-[12px] underline decoration-dotted hover:opacity-70"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        GitHub ↗
+      </a>
+      {contributors.length > 0 ? (
+        <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+          {contributors.map((person, index) => (
+            <span key={person.login}>
+              {index > 0 ? ", " : null}
+              <a
+                href={`https://github.com/${person.login}`}
+                target="_blank"
+                rel="noopener"
+                className="underline decoration-dotted hover:opacity-70"
+              >
+                {person.name}
+              </a>
+            </span>
+          ))}
+        </span>
+      ) : null}
+    </p>
   );
-}
-
-export function isRefreshBusy(busy: Set<string>, name: string): boolean {
-  return busy.has("*") || busy.has(name);
-}
-
-export function isRefreshAllDisabled(repo: string, anyBusy: boolean): boolean {
-  return anyBusy || contractsForRepo(repo).length === 0;
 }
 
 function iconBtnClass(disabled: boolean): string {
@@ -64,55 +64,24 @@ function iconBtnClass(disabled: boolean): string {
 export function EventRow({
   ev,
   query,
-  row,
-  busy,
-  onRefresh,
+  tolerance,
+  reason,
   onInspect,
+  onAnalyze,
 }: {
   ev: MigrationEvent;
   query: string;
-  row: CompareRow | null;
-  busy: Set<string>;
-  onRefresh: () => void;
+  tolerance: number;
+  reason: string | null;
   onInspect: () => void;
+  onAnalyze: (() => void) | null;
 }) {
   const legacy = ev.legacy.length ? ev.legacy.join(", ") : "—";
-  const vol = ev.v30 > 0 ? fmt(ev.v30) : ev.dev30 > 0 ? `${fmt(ev.dev30)} (dev)` : "—";
+  const ampVol = ev.v30 > 0 ? fmt(ev.v30) : ev.dev30 > 0 ? `${fmt(ev.dev30)} (dev)` : "—";
+  const aiVol = ev.ai30 == null ? "—" : fmt(ev.ai30);
+  const diff = ampAiDiffPct(ev.v30, ev.ai30);
+  const tone = diffTone(diff, tolerance);
   const tmpl = isTemplateName(ev.name, ev.legacy);
-  const usage =
-    ev.queried > 0 ? (
-      <span className="txt-3" title="Times queried in charts/dashboards in the last year">
-        {ev.queried} {ev.queried === 1 ? "query" : "queries"}
-      </span>
-    ) : (
-      "—"
-    );
-  let github: ReactNode = "—";
-  if (ev.merged || ev.pr) {
-    github = (
-      <>
-        {ev.merged ? (
-          <span className="txt-3 text-[10.5px]" title="Migration PR merged" aria-label="merged">
-            ✅
-          </span>
-        ) : null}
-        {ev.merged && ev.pr ? " " : null}
-        {ev.pr ? (
-          <a
-            href={ev.pr}
-            target="_blank"
-            rel="noopener"
-            className="underline decoration-dotted hover:opacity-70"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            PR
-          </a>
-        ) : null}
-      </>
-    );
-  }
-  const contracted = !!contractFor(ev.name);
-  const refreshDisabled = !contracted || isRefreshBusy(busy, ev.name);
   return (
     <tr className="border-t" style={{ borderColor: "var(--grid)" }}>
       <td className="py-1.5 pr-3 align-top">
@@ -128,44 +97,40 @@ export function EventRow({
           </span>
         ) : null}
       </td>
+      <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">{ampVol}</td>
       <td className="py-1.5 pr-3 align-top txt-3 font-mono text-[11px] break-all">
         <Highlight text={legacy} query={query} />
+      </td>
+      <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">{aiVol}</td>
+      <td className="py-1.5 pr-3 align-top text-right">
+        <span className="tabular-nums whitespace-nowrap" style={tone ? { color: DIFF_INK[tone] } : undefined}>
+          {diff == null ? "—" : `${diff}%`}
+        </span>
+        {reason ? (
+          <span className="block txt-3 text-[10.5px] font-normal mt-0.5 ml-auto max-w-[14rem]" style={{ color: "var(--text-secondary)" }}>
+            {reason}
+          </span>
+        ) : null}
       </td>
       <td className="py-1.5 pr-3 align-top">
         <Badge status={ev.status} />
       </td>
-      <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">{vol}</td>
-      <td className="py-1.5 pr-3 align-top text-right whitespace-nowrap text-[11px]">{usage}</td>
-      <td className="py-1.5 pr-3 align-top text-right whitespace-nowrap text-[11px]">{github}</td>
-      <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap text-[11px]">
-        {row?.match == null ? (
-          "—"
-        ) : (
-          <span style={{ color: pctColor(row.match) }} title={formatScoreTitle(row.parts)}>
-            {row.match}%
-          </span>
-        )}
-      </td>
-      <td className="py-1.5 pr-3 align-top text-right whitespace-nowrap">
-        <button
-          type="button"
-          className={iconBtnClass(refreshDisabled)}
-          disabled={refreshDisabled}
-          aria-label={`Refresh comparison for ${ev.name}`}
-          onClick={onRefresh}
-        >
-          <RefreshIcon />
-        </button>
-      </td>
       <td className="py-1.5 align-top text-right whitespace-nowrap">
-        <button
-          type="button"
-          className={iconBtnClass(false)}
-          aria-label={`Inspect ${ev.name}`}
-          onClick={onInspect}
-        >
-          <MagnifyIcon />
-        </button>
+        <span className="inline-flex items-center gap-1">
+          {onAnalyze ? (
+            <button type="button" className={iconBtnClass(false)} aria-label={`Analyze ${ev.name}`} onClick={onAnalyze}>
+              <AnalyzeIcon />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={iconBtnClass(false)}
+            aria-label={`Inspect ${ev.name}`}
+            onClick={onInspect}
+          >
+            <MagnifyIcon />
+          </button>
+        </span>
       </td>
     </tr>
   );
@@ -175,18 +140,18 @@ function EventTable({
   repo,
   events,
   query,
-  cache,
-  busy,
-  onRefresh,
+  tolerance,
+  reasons,
   onInspect,
+  onAnalyze,
 }: {
   repo: RepoRecord;
   events: MigrationEvent[];
   query: string;
-  cache: Record<string, CompareRow>;
-  busy: Set<string>;
-  onRefresh: (ev: MigrationEvent) => void;
+  tolerance: number;
+  reasons: Map<string, ReturnType<typeof explainEvent>>;
   onInspect: (ev: MigrationEvent) => void;
+  onAnalyze: (ev: MigrationEvent) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -195,28 +160,22 @@ function EventTable({
         <thead>
           <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
             <th scope="col" className="py-1.5 pr-3 font-semibold">
-              New (Amplitude) event
+              Amplitude Event
+            </th>
+            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+              Amp Vol
             </th>
             <th scope="col" className="py-1.5 pr-3 font-semibold">
-              Legacy name
+              App Intel Event
+            </th>
+            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+              AI Vol
+            </th>
+            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+              Diff
             </th>
             <th scope="col" className="py-1.5 pr-3 font-semibold">
               Status
-            </th>
-            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
-              30d volume
-            </th>
-            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
-              Usage
-            </th>
-            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
-              GitHub
-            </th>
-            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
-              Match
-            </th>
-            <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
-              <span className="sr-only">Refresh</span>
             </th>
             <th scope="col" className="py-1.5 font-semibold text-right">
               <span className="sr-only">Inspect</span>
@@ -224,17 +183,21 @@ function EventTable({
           </tr>
         </thead>
         <tbody>
-          {events.map((e) => (
-            <EventRow
-              key={`${e.name}|${e.legacy.join(",")}`}
-              ev={e}
-              query={query}
-              row={overlayFor(cache, e.name)}
-              busy={busy}
-              onRefresh={() => onRefresh(e)}
-              onInspect={() => onInspect(e)}
-            />
-          ))}
+          {events.map((e) => {
+            const key = `${e.name}|${e.legacy.join(",")}`;
+            const explanation = reasons.get(key);
+            return (
+              <EventRow
+                key={key}
+                ev={e}
+                query={query}
+                tolerance={tolerance}
+                reason={explanation ? reasonText(explanation) : null}
+                onInspect={() => onInspect(e)}
+                onAnalyze={explanation?.kind === "unexplained" ? () => onAnalyze(e) : null}
+              />
+            );
+          })}
         </tbody>
       </table>
       {events.length < repo.total ? (
@@ -253,77 +216,61 @@ export function AppDetail({
   repo: RepoRecord;
   onTip: (text: string | null, e?: MouseEvent) => void;
 }) {
+  const { tolerance, applied } = useVolumeWindow();
   const { live, scored, pct, unassessable } = repoCompletion(r);
   const events = sortEvents(r.events, "volume");
-  const [cache, setCache] = useState<Record<string, CompareRow>>({});
-  const [busy, setBusy] = useState<Set<string>>(() => new Set());
+  const [contributors, setContributors] = useState<RepoContributor[]>([]);
   const [inspecting, setInspecting] = useState<MigrationEvent | null>(null);
-  const [clientError, setClientError] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState<MigrationEvent | null>(null);
+  const [daily, setDaily] = useState<Array<{ eventName: string; source: "amp" | "ai"; day: string; count: number }>>([]);
 
   useEffect(() => {
-    setCache({});
-    setBusy(new Set());
-    setInspecting(null);
-    setClientError(null);
+    if (!applied) {
+      setDaily([]);
+      return;
+    }
     let cancelled = false;
-    fetch(`/api/compare/${encodeURIComponent(r.repo)}`)
-      .then((res) => res.json() as Promise<{ rows?: CompareRow[] }>)
+    const params = new URLSearchParams({ start: applied.start, end: applied.end });
+    fetch(`/api/repos/${encodeURIComponent(r.repo)}/volume?${params}`)
+      .then((res) => res.json() as Promise<{ rows?: Array<{ eventName: string; source: "amp" | "ai"; day: string; count: number }> }>)
       .then((body) => {
-        if (cancelled) return;
-        const next: Record<string, CompareRow> = {};
-        for (const row of body.rows ?? []) next[row.eventName] = row;
-        setCache(next);
+        if (!cancelled) setDaily(body.rows ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [r.repo, applied]);
+
+  const reasons = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof explainEvent>>();
+    for (const event of events) {
+      const days: DayVolume[] | null = applied
+        ? eventVolumeSeries(
+            applied,
+            daily.filter((row) => row.eventName === event.name),
+            event.ai30 != null,
+          )
+        : null;
+      map.set(`${event.name}|${event.legacy.join(",")}`, explainEvent(event, events, days, tolerance));
+    }
+    return map;
+  }, [events, daily, applied, tolerance]);
+  const summary = explainSummary(explainCounts([...reasons.values()]));
+
+  useEffect(() => {
+    setContributors([]);
+    let cancelled = false;
+    fetch(`/api/repos/${encodeURIComponent(r.repo)}/contributors`)
+      .then((res) => res.json() as Promise<{ contributors?: RepoContributor[] }>)
+      .then((body) => {
+        if (!cancelled) setContributors(body.contributors ?? []);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [r.repo]);
-
-  const overlayRows = events
-    .map((ev) => overlayFor(cache, ev.name))
-    .filter((row): row is CompareRow => row != null);
-  const lastRefreshedAt = overlayRows.reduce<string | null>((best, row) => {
-    if (!row.refreshedAt) return best;
-    if (!best || row.refreshedAt > best) return row.refreshedAt;
-    return best;
-  }, null);
-  const headerError = overlayRows.find((row) => row.lastError)?.lastError ?? null;
-  const displayError = clientError ?? headerError;
-  const anyBusy = busy.size > 0;
-  const refreshAllDisabled = isRefreshAllDisabled(r.repo, anyBusy);
-
-  async function refreshAll() {
-    setBusy(new Set(["*"]));
-    try {
-      const rows = await postRefresh(`/api/compare/${encodeURIComponent(r.repo)}/refresh`);
-      setCache((prev) => mergeRows(prev, rows));
-      setClientError(null);
-    } catch (err) {
-      setClientError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(new Set());
-    }
-  }
-
-  async function refreshEvent(ev: MigrationEvent) {
-    setBusy((prev) => new Set(prev).add(ev.name));
-    try {
-      const rows = await postRefresh(
-        `/api/compare/${encodeURIComponent(r.repo)}/events/${encodeURIComponent(ev.name)}/refresh`,
-      );
-      setCache((prev) => mergeRows(prev, rows));
-      setClientError(null);
-    } catch (err) {
-      setClientError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy((prev) => {
-        const next = new Set(prev);
-        next.delete(ev.name);
-        return next;
-      });
-    }
-  }
 
   return (
     <div>
@@ -335,17 +282,8 @@ export function AppDetail({
       <header className="flex items-start justify-between gap-4 mb-4">
         <div className="min-w-0 flex-1">
           <h1 className="text-[21px] font-bold tracking-tight">{r.repo}</h1>
-          <p className="mt-1">
-            <a
-              href={githubRepoUrl(r.repo)}
-              target="_blank"
-              rel="noopener"
-              className="text-[12px] underline decoration-dotted hover:opacity-70"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              GitHub ↗
-            </a>
-          </p>
+          <GitHubLine repo={r.repo} contributors={contributors} />
+          {summary ? <p className="txt-2 text-[12px] mt-2">{summary}</p> : null}
           <div className="mt-3 max-w-md">
             <Meter counts={r.counts} total={r.total} onTip={onTip} />
           </div>
@@ -365,31 +303,10 @@ export function AppDetail({
               </span>
               <span className="block text-[12.5px] tabular-nums font-medium mt-1">
                 {r.volume30 ? fmt(r.volume30) : "—"}{" "}
-                <span className="txt-3 text-[10.5px] font-normal">30d events</span>
+                <span className="txt-3 text-[10.5px] font-normal">events</span>
               </span>
             </>
           )}
-          {!unassessable ? (
-            <div className="mt-3">
-              <button
-                type="button"
-                className="surf border rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:opacity-80 disabled:opacity-40"
-                disabled={refreshAllDisabled}
-                aria-busy={anyBusy}
-                onClick={() => void refreshAll()}
-              >
-                Refresh all
-              </button>
-              <span className="block txt-3 text-[11px] mt-1">
-                Last refreshed {lastRefreshedAt ? new Date(lastRefreshedAt).toLocaleString() : "Never"}
-              </span>
-              {displayError ? (
-                <span className="block text-[11px] mt-0.5" style={{ color: "var(--st-critical-ink)" }}>
-                  {displayError}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
         </div>
       </header>
       <section className="surf border rounded-lg px-4 py-3">
@@ -400,18 +317,29 @@ export function AppDetail({
             repo={r}
             events={events}
             query=""
-            cache={cache}
-            busy={busy}
-            onRefresh={(ev) => void refreshEvent(ev)}
+            tolerance={tolerance}
+            reasons={reasons}
             onInspect={setInspecting}
+            onAnalyze={setAnalyzing}
           />
         )}
       </section>
       {inspecting ? (
         <EventCompareModal
-          row={overlayFor(cache, inspecting.name) ?? pendingCompareRow(inspecting.name)}
-          legacy={inspecting.legacy}
+          event={inspecting}
+          repo={r.repo}
+          applied={applied}
+          tolerance={tolerance}
           onClose={() => setInspecting(null)}
+        />
+      ) : null}
+      {analyzing ? (
+        <EventAnalysisModal
+          event={analyzing}
+          repo={r.repo}
+          applied={applied}
+          tolerance={tolerance}
+          onClose={() => setAnalyzing(null)}
         />
       ) : null}
     </div>

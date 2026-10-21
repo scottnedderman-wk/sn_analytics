@@ -1,55 +1,122 @@
 import { expect, test } from "bun:test";
+import type { EventSample } from "@/lib/eventSample";
 import { renderToString } from "react-dom/server";
-import { compareRowFromCache, compareRowFromContract } from "@/lib/eventCompare";
+import type { MigrationEvent } from "@/lib/model";
 import { EventCompareModal } from "./EventCompareModal";
 
-test("GEL modal lists comparable fields and omitted note", () => {
-  const row = compareRowFromContract("General Experience Loading")!;
-  const html = renderToString(
-    <EventCompareModal row={row} legacy={["GeneralExperienceLoadingEventV2"]} onClose={() => {}} />,
-  );
-  expect(html).toContain("General Experience Loading");
-  expect(html).toContain("dimensions:timestamp");
-  expect(html).toContain("event_date");
-  expect(html).toContain("dimensions:url");
-  expect(html).toContain("page_url");
-  expect(html).toContain("dimensions:host");
-  expect(html).toContain("page_domain");
-  expect(html).toContain("Populated");
-  expect(html).toContain("pending");
-  expect(html).toContain("experience_name");
-  expect(html).toContain("page_location");
-  expect(html).toContain("page_path");
-  expect(html).not.toContain("analytic_date");
-  expect(html).not.toContain("same event instance");
-  expect(html).toContain("w-[80vw]");
-  expect(html).not.toContain("max-w-3xl");
+const event = (over: Partial<MigrationEvent> = {}): MigrationEvent => ({
+  name: "Rename Outline Title",
+  legacy: ["OutlineRenameTitleEventV1"],
+  status: "live",
+  v30: 40,
+  v365: 0,
+  dev30: 0,
+  merged: false,
+  pr: null,
+  amp_count: 1,
+  ss_error: "",
+  queried: 0,
+  ai30: 25,
+  ...over,
 });
 
-test("GEL modal lists daily volume when the snapshot has overlap days", () => {
-  const row = compareRowFromCache(
-    "General Experience Loading",
-    {
-      version: 1,
-      window: { start: "2026-08-18", end: "2026-08-24" },
-      volume: { ai: 40, amp: 50 },
-      daily: [
-        { date: "2026-08-18", ai: 40, amp: 50 },
-        { date: "2026-08-19", ai: null, amp: 50 },
-      ],
-      fields: [],
-    },
-    "2026-08-26T00:00:00.000Z",
-    null,
-  );
+test("modal lists each day in the applied window with the same diff coloring", () => {
   const html = renderToString(
-    <EventCompareModal row={row} legacy={["GeneralExperienceLoadingEventV2"]} onClose={() => {}} />,
+    <EventCompareModal
+      event={event()}
+      repo="w_outline"
+      applied={{ start: "2026-08-17", end: "2026-08-19" }}
+      tolerance={5}
+      days={[
+        { date: "2026-08-17", amp: 1000, ai: 1100 },
+        { date: "2026-08-18", amp: 0, ai: 5 },
+        { date: "2026-08-19", amp: 1600, ai: 1600 },
+      ]}
+      onClose={() => {}}
+    />,
   );
+  expect(html).toContain("Rename Outline Title");
+  expect(html).toContain("OutlineRenameTitleEventV1");
+  expect(html).toContain("2026-08-17 – 2026-08-19");
+  expect(html).toContain("2026-08-17");
   expect(html).toContain("2026-08-18");
-  expect(html).toContain("40");
-  expect(html).toContain("50");
   expect(html).toContain("2026-08-19");
-  expect(html).toMatch(/2026-08-19<\/td><td[^>]*>—</);
-  expect(html).not.toMatch(/2026-08-19<\/td><td[^>]*>pending</);
-  expect(html).toContain("warehouse lag");
+  expect(html).toContain(">2,600<");
+  expect(html).toContain(">2,705<");
+  expect(html).toContain(">-10%<");
+  expect(html).toContain(">0%<");
+  expect(html).toContain("color:var(--st-critical-ink)");
+  expect(html).toContain("color:var(--st-good-ink)");
+  expect(html).toContain("w-[80vw]");
+  expect(html).not.toContain("pending");
+  expect(html).not.toContain("Comparable fields");
+  expect(html).not.toContain("Last refreshed");
+});
+
+const paired: EventSample = {
+  paired: true,
+  amp: {
+    eventTime: "2026-08-19 15:01:02",
+    user: "user-1",
+    organization: "org-1",
+    workspace: "ws-1",
+    duration: "12",
+    environment: "us",
+    pageUrl: "https://app.example/a",
+    host: "app.example",
+    properties: { experienceName: "Outline" },
+  },
+  ai: {
+    eventTime: "2026-08-19 15:01:02",
+    user: "user-1",
+    organization: "org-1",
+    workspace: "ws-1",
+    duration: "12",
+    environment: "production",
+    pageUrl: "https://app.example/a",
+    host: "app.example",
+    properties: { browser: "Chrome", os: "macOS" },
+  },
+};
+
+test("modal shows one paired example side by side", () => {
+  const html = renderToString(
+    <EventCompareModal
+      event={event()}
+      repo="w_outline"
+      applied={{ start: "2026-08-17", end: "2026-08-19" }}
+      tolerance={5}
+      days={[{ date: "2026-08-19", amp: 1, ai: 1 }]}
+      sample={paired}
+      onClose={() => {}}
+    />,
+  );
+  expect(html).toContain("Same event in Amplitude and App Intel.");
+  expect(html).toContain("user-1");
+  expect(html).toContain("production");
+  expect(html).toContain("experienceName");
+  expect(html).toContain("Outline");
+  expect(html).toContain("browser");
+  expect(html).toContain("Chrome");
+  expect(html).toContain("os");
+  expect(html).toContain("macOS");
+  expect(html.indexOf(">experienceName<")).toBeLessThan(html.indexOf(">Outline<"));
+  expect(html.indexOf(">Amplitude<")).toBeLessThan(html.indexOf(">App Intel<"));
+  expect(html).not.toContain("Loading example");
+});
+
+test("modal leaves App Intel blank when the event has no identity", () => {
+  const html = renderToString(
+    <EventCompareModal
+      event={event({ ai30: null })}
+      repo="w_outline"
+      applied={{ start: "2026-08-17", end: "2026-08-17" }}
+      tolerance={5}
+      days={[{ date: "2026-08-17", amp: 4, ai: null }]}
+      onClose={() => {}}
+    />,
+  );
+  expect(html).toContain(">4<");
+  expect(html).toContain(">—</dd>");
+  expect(html).not.toContain(">-");
 });

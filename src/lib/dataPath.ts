@@ -1,1 +1,1 @@
-export const dataJsonUrl = new URL("../data/data.json", import.meta.url);
+export const seedJsonUrl = new URL("../../data/seed.json", import.meta.url);

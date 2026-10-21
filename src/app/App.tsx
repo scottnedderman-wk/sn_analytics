@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from "react-router";
 import { NotFound } from "@/components/ui";
 import { parseRoute, type DashboardData } from "@/lib/model";
+import { hydrateSeed, type SeedData } from "@/lib/seed";
 import { AppPage } from "@/routes/app/AppPage";
 import { Dashboard } from "@/routes/dashboard/Dashboard";
 import "../index.css";
@@ -33,10 +34,10 @@ function AppLayout({
 
 export function AppRoutes({ data, onData, theme, onToggleTheme, onTip }: AppRoutesProps) {
   return (
-    <VolumeWindowProvider>
+    <VolumeWindowProvider onData={onData}>
       <Routes>
         <Route element={<AppLayout theme={theme} onToggleTheme={onToggleTheme} />}>
-          <Route index element={<Dashboard data={data} onData={onData} onTip={onTip} />} />
+          <Route index element={<Dashboard data={data} onTip={onTip} />} />
           <Route path="app/:repo" element={<AppPage data={data} onTip={onTip} />} />
           <Route path="*" element={<NotFound message="That page does not exist." />} />
         </Route>
@@ -63,7 +64,7 @@ function AppShell({
   const location = useLocation();
 
   useEffect(() => {
-    const base = "Analytics Migration Status — Workiva";
+    const base = "Analytics Migration — Workiva";
     const route = parseRoute(location.pathname);
     if (route.page === "unknown") {
       document.title = `Not found · ${base}`;
@@ -81,7 +82,7 @@ function AppShell({
   if (error) {
     return (
       <>
-        <h1 className="text-[21px] font-bold tracking-tight">Analytics Migration Status</h1>
+        <h1 className="text-[21px] font-bold tracking-tight">Analytics Migration</h1>
         <p className="mt-4" style={{ color: "var(--st-critical-ink)" }}>
           Could not load dashboard data: {error}
         </p>
@@ -104,13 +105,13 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/data.json")
+    fetch("/seed.json")
       .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load data.json (${res.status})`);
-        return res.json() as Promise<DashboardData>;
+        if (!res.ok) throw new Error(`Failed to load seed.json (${res.status})`);
+        return res.json() as Promise<SeedData>;
       })
       .then((json) => {
-        if (!cancelled) setData(json);
+        if (!cancelled) setData(hydrateSeed(json));
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -144,7 +145,7 @@ export function App() {
   return (
     <BrowserRouter>
       <div className="font-sans text-[13px] leading-relaxed">
-        <div className="max-w-[1180px] mx-auto px-5 py-7 pb-24">
+        <div className="max-w-[1180px] mx-auto px-5 pb-24">
           <AppShell
             data={data}
             error={error}

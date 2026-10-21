@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { AppSummary } from "./AppSummary";
+import { AppSummary, ampAiDiffPct, diffTone } from "./AppSummary";
 import type { MigrationEvent, RepoRecord } from "@/lib/model";
 
 function renderSummary(node: ReactNode): string {
@@ -40,13 +40,37 @@ const repo: RepoRecord = {
   inv_unmapped: 0,
 };
 
-test("AppSummary groups Amplitude and App Intel last-30d columns", () => {
-  const html = renderSummary(<AppSummary repo={repo} query="" />);
+test("AppSummary groups Amplitude and App Intel columns without a 30d subheader", () => {
+  const html = renderSummary(<AppSummary repo={repo} query="" tolerance={5} />);
   expect(html).toContain("Amplitude");
   expect(html).toContain("App Intel");
-  expect(html).toContain("Last 30d");
-  expect(html).toContain("30d vol");
+  expect(html).not.toContain("Last 30d");
+  expect(html).not.toContain("30d vol");
   expect(html).toContain(">1K<");
+  expect(html).toContain("sparkline");
+  expect(html).toContain("Diff");
+  expect(html).toContain(">-10%<");
+  expect(html).toContain("color:var(--st-critical-ink)");
+});
+
+test("diffTone is green at or inside the tolerance and red outside it", () => {
+  expect(diffTone(0, 1)).toBe("within");
+  expect(diffTone(-10, 10)).toBe("within");
+  expect(diffTone(10, 10)).toBe("within");
+  expect(diffTone(-11, 10)).toBe("outside");
+  expect(diffTone(null, 5)).toBeNull();
+  const within = renderSummary(<AppSummary repo={repo} query="" tolerance={10} />);
+  expect(within).toContain("color:var(--st-good-ink)");
+  expect(within).not.toContain("color:var(--st-critical-ink)");
+});
+
+test("ampAiDiffPct is (Amplitude - App Intel) / Amplitude as a whole percent", () => {
+  expect(ampAiDiffPct(1600, 1600)).toBe(0);
+  expect(ampAiDiffPct(112000, 167000)).toBe(-49);
+  expect(ampAiDiffPct(167000, 112000)).toBe(33);
+  expect(ampAiDiffPct(0, 100)).toBeNull();
+  expect(ampAiDiffPct(1000, null)).toBeNull();
+  expect(ampAiDiffPct(1000, 0)).toBe(100);
 });
 
 function event(over: Partial<MigrationEvent> = {}): MigrationEvent {
@@ -84,10 +108,13 @@ function repoOf(events: MigrationEvent[], over: Partial<RepoRecord> = {}): RepoR
 
 test("AppSummary renders em dash when ai30 is null, not fmt(0)", () => {
   const html = renderSummary(
-    <AppSummary repo={repoOf([event({ ai30: null })])} query="" />,
+    <AppSummary repo={repoOf([event({ ai30: null })])} query="" tolerance={5} />,
   );
   expect(html).toContain("—");
   expect(html).not.toContain(">0<");
+  expect(html).toContain('whitespace-nowrap w-[1%]">—</td>');
+  expect(html).not.toContain("--st-good-ink");
+  expect(html).not.toContain("--st-critical-ink");
 });
 
 test("AppSummary still ranks live events by Amplitude volume", () => {
@@ -99,6 +126,7 @@ test("AppSummary still ranks live events by Amplitude volume", () => {
         event({ name: "Stale High", status: "stale", v30: 9000, ai30: 9000 }),
       ])}
       query=""
+      tolerance={5}
     />,
   );
   expect(html).toContain("High Amp");
@@ -107,11 +135,12 @@ test("AppSummary still ranks live events by Amplitude volume", () => {
   expect(html).not.toContain("Stale High");
 });
 
-test("AppSummary omits Last 30d columns when neither series is long enough", () => {
+test("AppSummary omits sparklines when neither series is long enough", () => {
   const html = renderSummary(
-    <AppSummary repo={repoOf([event({ series30: [1], aiSeries30: [1], ai30: 1100 })])} query="" />,
+    <AppSummary repo={repoOf([event({ series30: [1], aiSeries30: [1], ai30: 1100 })])} query="" tolerance={5} />,
   );
   expect(html).toContain("Amplitude");
   expect(html).toContain("App Intel");
-  expect(html).not.toContain("Last 30d");
+  expect(html).not.toContain("sparkline");
+  expect(html).not.toContain("30d vol");
 });

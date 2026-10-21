@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { Dashboard } from "./Dashboard";
+import { VolumeWindowProvider } from "@/app/VolumeWindowContext";
 import type { DashboardData } from "@/lib/model";
+import { Dashboard } from "./Dashboard";
 
 const data: DashboardData = {
   provenance: "mapping",
@@ -39,18 +40,34 @@ const data: DashboardData = {
   ],
 };
 
-test("homepage shows Refresh, Updated copy, and Amp vs AI card totals", () => {
+test("homepage shows Refresh and Amp vs AI card totals", () => {
   const html = renderToString(
     <MemoryRouter>
-      <Dashboard data={data} onData={() => {}} onTip={() => {}} now={new Date("2026-09-16T18:00:00Z")} />
+      <VolumeWindowProvider onData={() => {}}>
+        <Dashboard data={data} onTip={() => {}} />
+      </VolumeWindowProvider>
     </MemoryRouter>,
   );
   expect(html).toContain("Refresh");
-  expect(html).toContain("Updated 3 days ago");
+  expect(html).not.toContain("user_analytics");
   expect(html).toContain("Amp");
   expect(html).toContain("AI");
   expect(html).toContain("2K");
   expect(html).toContain("hover:opacity-80");
   expect(html).toContain("disabled:opacity-40");
   expect(html).toContain('aria-busy="false"');
+  expect(html).toContain("grid-cols-4");
+  expect(html).not.toContain("grid-cols-2");
+  const count = html.indexOf('role="status"');
+  const toggle = html.indexOf('aria-controls="status-legend"');
+  const legend = html.indexOf("Status legend");
+  const card = html.indexOf("wdesk_sdk");
+  expect(count).toBeGreaterThan(-1);
+  expect(toggle).toBeGreaterThan(count);
+  expect(legend).toBeGreaterThan(toggle);
+  expect(card).toBeGreaterThan(legend);
+  expect(html).toContain('aria-expanded="false"');
+  expect(html).toContain("Excluding blocked &amp; dev");
+  expect(html).toContain('id="status-legend"');
+  expect(html).toContain('hidden=""');
 });

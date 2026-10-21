@@ -1,90 +1,61 @@
-import { useEffect, useRef } from "react";
-import {
-  contractFor,
-  formatScoreTitle,
-  type CompareRow,
-  type ContractField,
-  type SnapshotField,
-} from "@/lib/eventCompare";
-import { pctColor } from "@/lib/model";
+import { useEffect, useRef, useState } from "react";
+import { DIFF_INK, ampAiDiffPct, diffTone } from "@/routes/dashboard/AppSummary";
+import { exampleFieldRows, type EventSample } from "@/lib/eventSample";
+import { eventVolumeSeries, type EventDayVolume } from "@/lib/eventVolumeCache";
+import type { MigrationEvent } from "@/lib/model";
+import type { DayWindow } from "@/lib/volumeWindow";
 
-function scoreChip(n: number | null): string {
-  return n == null ? "pending" : `${n}%`;
+function countText(n: number | null): string {
+  return n == null ? "—" : n.toLocaleString("en-US");
 }
 
-function volumeText(n: number | null | undefined, empty = "pending"): string {
-  return n == null ? empty : n.toLocaleString();
+function sampleCaption(sample: EventSample): string {
+  if (sample.paired) return "Same event in Amplitude and App Intel.";
+  if (sample.amp && sample.ai) return "One example from each system in this window.";
+  if (sample.amp) return "Amplitude example from this window.";
+  if (sample.ai) return "App Intel example from this window.";
+  return "No events in this window.";
 }
 
-function fillPct(n: number | null): string | null {
-  return n == null ? null : `${Math.round(n * 100)}%`;
-}
-
-function populatedCell(aiFill: number | null, ampFill: number | null): string {
-  const ai = fillPct(aiFill);
-  const amp = fillPct(ampFill);
-  if (ai == null || amp == null) return "pending";
-  return `${ai}/${amp}`;
-}
-
-type FieldView = {
-  label: string;
-  aiColumn: string;
-  aiType: string;
-  ampColumn: string;
-  ampType: string;
-  present: boolean;
-  typeCompatible: boolean;
-  aiFill: number | null;
-  ampFill: number | null;
-};
-
-function comparableFields(row: CompareRow): FieldView[] {
-  const contract = contractFor(row.eventName);
-  if (row.snapshot?.fields.length) {
-    return row.snapshot.fields.map((f: SnapshotField) => ({
-      label: contract?.fields.find((c) => c.key === f.key)?.label ?? f.key,
-      aiColumn: f.aiColumn,
-      aiType: f.aiType,
-      ampColumn: f.ampColumn,
-      ampType: f.ampType,
-      present: f.present,
-      typeCompatible: f.typeCompatible,
-      aiFill: f.aiFill,
-      ampFill: f.ampFill,
-    }));
-  }
-  return (contract?.fields ?? []).map((f: ContractField) => ({
-    label: f.label,
-    aiColumn: f.aiColumn,
-    aiType: f.aiType,
-    ampColumn: f.ampColumn,
-    ampType: f.ampType,
-    present: f.present,
-    typeCompatible: f.typeCompatible,
-    aiFill: null,
-    ampFill: null,
-  }));
+function DiffValue({ amp, ai, tolerance }: { amp: number; ai: number | null; tolerance: number }) {
+  const diff = ampAiDiffPct(amp, ai);
+  const tone = diffTone(diff, tolerance);
+  return (
+    <span className="tabular-nums" style={tone ? { color: DIFF_INK[tone] } : undefined}>
+      {diff == null ? "—" : `${diff}%`}
+    </span>
+  );
 }
 
 export function EventCompareModal({
-  row,
-  legacy,
+  event,
+  repo,
+  applied,
+  tolerance,
+  days,
+  sample: sampleProp,
   onClose,
 }: {
-  row: CompareRow;
-  legacy: string[];
+  event: MigrationEvent;
+  repo: string;
+  applied: DayWindow | null;
+  tolerance: number;
+  days?: EventDayVolume[];
+  sample?: EventSample | null;
   onClose: () => void;
 }): JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const headingId = "event-compare-title";
-  const contract = contractFor(row.eventName);
-  const fields = comparableFields(row);
-  const aiVolume = row.snapshot?.volume.ai;
-  const ampVolume = row.snapshot?.volume.amp;
-  const subtitle = legacy.length ? legacy.join(", ") : "—";
+  const [loaded, setLoaded] = useState<EventDayVolume[] | null>(days ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const [sample, setSample] = useState<EventSample | null>(sampleProp ?? null);
+  const [sampleError, setSampleError] = useState<string | null>(null);
+  const subtitle = event.legacy.length ? event.legacy.join(", ") : "—";
+  const series = days ?? loaded;
+  const ampTotal = series?.reduce((sum, day) => sum + day.amp, 0) ?? 0;
+  const aiTotal = event.ai30 == null || !series ? null : series.reduce((sum, day) => sum + (day.ai ?? 0), 0);
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -98,6 +69,52 @@ export function EventCompareModal({
       previous?.focus();
     };
   }, []);
+
+  useEffect(() => {
+    if (days || !applied) return;
+    let cancelled = false;
+    setLoaded(null);
+    setError(null);
+    const params = new URLSearchParams({ start: applied.start, end: applied.end });
+    fetch(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/volume?${params}`)
+      .then(async (res) => {
+        const body = (await res.json()) as { rows?: Array<{ source: "amp" | "ai"; day: string; count: number }>; error?: string };
+        if (!res.ok) throw new Error(body.error ?? res.statusText);
+        return body.rows ?? [];
+      })
+      .then((rows) => {
+        if (!cancelled) setLoaded(eventVolumeSeries(applied, rows, event.ai30 != null));
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [days, applied, repo, event.name, event.ai30]);
+
+  useEffect(() => {
+    if (sampleProp !== undefined || !applied) return;
+    let cancelled = false;
+    setSample(null);
+    setSampleError(null);
+    const params = new URLSearchParams({ start: applied.start, end: applied.end });
+    fetch(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/sample?${params}`)
+      .then(async (res) => {
+        const body = (await res.json()) as EventSample & { error?: string };
+        if (!res.ok) throw new Error(body.error ?? res.statusText);
+        return body;
+      })
+      .then((body) => {
+        if (!cancelled) setSample(body);
+      })
+      .catch((err) => {
+        if (!cancelled) setSampleError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sampleProp, applied, repo, event.name]);
 
   return (
     <>
@@ -120,168 +137,120 @@ export function EventCompareModal({
         <header className="flex items-start justify-between gap-3 mb-4">
           <div className="min-w-0">
             <h2 id={headingId} className="text-[18px] font-bold tracking-tight">
-              {row.eventName}
+              {event.name}
             </h2>
             <p className="txt-3 font-mono text-[11px] mt-1 break-all">{subtitle}</p>
-          </div>
-          <div className="shrink-0 text-right">
-            {row.match == null ? (
-              <span className="txt-3 text-[18px] font-bold">—</span>
+            {applied ? (
+              <p className="txt-2 text-[12px] mt-2 tabular-nums">{`${applied.start} – ${applied.end}`}</p>
             ) : (
-              <span
-                className="block text-[18px] font-bold tabular-nums"
-                style={{ color: pctColor(row.match) }}
-                title={formatScoreTitle(row.parts)}
-              >
-                {row.match}%
-              </span>
+              <p className="txt-2 text-[12px] mt-2">Apply a date window to load this event.</p>
             )}
-            <button
-              type="button"
-              className="surf border rounded-md px-2.5 py-1 text-[12px] font-medium mt-2 hover:opacity-80"
-              onClick={onClose}
-            >
-              Close
-            </button>
           </div>
+          <button
+            type="button"
+            className="surf border rounded-md px-2.5 py-1 text-[12px] font-medium hover:opacity-80"
+            onClick={onClose}
+          >
+            Close
+          </button>
         </header>
 
-        {row.lastError ? (
-          <p className="txt-2 text-[12px] mb-3" style={{ color: "var(--st-critical-ink)" }}>
-            {row.lastError}
+        {error ? (
+          <p className="text-[12px] mb-3" style={{ color: "var(--st-critical-ink)" }}>
+            {error}
           </p>
         ) : null}
 
-        <ul className="flex flex-wrap gap-2 mb-4">
-          {(
-            [
-              ["Present", row.parts.present],
-              ["Type/format", row.parts.type],
-              ["Populated", row.parts.populated],
-              ["Volume", row.parts.volume],
-            ] as const
-          ).map(([label, value]) => (
-            <li
-              key={label}
-              className="border rounded-md px-2 py-1 text-[11px]"
-              style={{ borderColor: "var(--border)", background: "var(--surface-1)" }}
-            >
-              <span className="txt-3">{label}</span>{" "}
-              <span className="font-medium tabular-nums">{scoreChip(value)}</span>
-            </li>
-          ))}
-        </ul>
-
-        <section className="mb-4">
-          <h3 className="text-[10.5px] font-bold uppercase tracking-wider txt-3 mb-2">Volume</h3>
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px]">
-            <dt className="txt-3">App Intel</dt>
-            <dd className="tabular-nums text-right">{volumeText(aiVolume)}</dd>
-            <dt className="txt-3">Amplitude</dt>
-            <dd className="tabular-nums text-right">{volumeText(ampVolume)}</dd>
-            {row.snapshot ? (
-              <>
-                <dt className="txt-3">Window</dt>
-                <dd className="tabular-nums text-right">
-                  {row.snapshot.window.start} – {row.snapshot.window.end}
+        {applied && series ? (
+          <>
+            <dl className="grid grid-cols-3 gap-3 mb-4 text-[12px]">
+              <div>
+                <dt className="txt-3">Amplitude</dt>
+                <dd className="text-[15px] font-medium tabular-nums">{countText(ampTotal)}</dd>
+              </div>
+              <div>
+                <dt className="txt-3">App Intel</dt>
+                <dd className="text-[15px] font-medium tabular-nums">{countText(aiTotal)}</dd>
+              </div>
+              <div>
+                <dt className="txt-3">Diff</dt>
+                <dd className="text-[15px] font-medium">
+                  <DiffValue amp={ampTotal} ai={aiTotal} tolerance={tolerance} />
                 </dd>
-              </>
-            ) : null}
-            <dt className="txt-3">Last refreshed</dt>
-            <dd className="text-right">{row.refreshedAt ? new Date(row.refreshedAt).toLocaleString() : "Never"}</dd>
-          </dl>
-          {row.snapshot?.daily?.length ? (
-            <>
-              <table className="w-full text-left border-collapse text-[12px] mt-3">
-                <thead>
-                  <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
-                    <th scope="col" className="py-1.5 pr-3 font-semibold">
-                      Day
-                    </th>
-                    <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
-                      App Intel
-                    </th>
-                    <th scope="col" className="py-1.5 font-semibold text-right">
-                      Amplitude
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {row.snapshot.daily.map((d) => (
-                    <tr key={d.date} className="border-t" style={{ borderColor: "var(--grid)" }}>
-                      <td className="py-1 pr-3">{d.date}</td>
-                      <td className="py-1 pr-3 text-right tabular-nums">{volumeText(d.ai, "—")}</td>
-                      <td className="py-1 text-right tabular-nums">{volumeText(d.amp, "—")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="txt-3 text-[11px] mt-2">
-                Volume % uses days present on both sides. An em dash is warehouse lag, not a dual-write miss.
-              </p>
-            </>
-          ) : null}
-        </section>
-
-        <section className="mb-4 overflow-x-auto">
-          <h3 className="text-[10.5px] font-bold uppercase tracking-wider txt-3 mb-2">Comparable fields</h3>
-          <table className="w-full text-left border-collapse text-[12px]">
-            <thead>
-              <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
-                <th scope="col" className="py-1.5 pr-3 font-semibold">
-                  Field
-                </th>
-                <th scope="col" className="py-1.5 pr-3 font-semibold">
-                  App Intel
-                </th>
-                <th scope="col" className="py-1.5 pr-3 font-semibold">
-                  Amplitude
-                </th>
-                <th scope="col" className="py-1.5 pr-3 font-semibold">
-                  Present
-                </th>
-                <th scope="col" className="py-1.5 pr-3 font-semibold">
-                  Type/format
-                </th>
-                <th scope="col" className="py-1.5 font-semibold">
-                  Populated
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {fields.map((f) => (
-                <tr key={f.label} className="border-t" style={{ borderColor: "var(--grid)" }}>
-                  <td className="py-1.5 pr-3 align-top font-medium">{f.label}</td>
-                  <td className="py-1.5 pr-3 align-top font-mono text-[11px] txt-2">
-                    {f.aiColumn} {f.aiType}
-                  </td>
-                  <td className="py-1.5 pr-3 align-top font-mono text-[11px] txt-2">
-                    {f.ampColumn} {f.ampType}
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">{f.present ? "yes" : "no"}</td>
-                  <td className="py-1.5 pr-3 align-top">{f.typeCompatible ? "yes" : "no"}</td>
-                  <td className="py-1.5 align-top tabular-nums">{populatedCell(f.aiFill, f.ampFill)}</td>
+              </div>
+            </dl>
+            <table className="w-full text-left border-collapse text-[12px]">
+              <thead>
+                <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
+                  <th scope="col" className="py-1.5 pr-3 font-semibold">
+                    Day
+                  </th>
+                  <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+                    Amplitude
+                  </th>
+                  <th scope="col" className="py-1.5 pr-3 font-semibold text-right">
+                    App Intel
+                  </th>
+                  <th scope="col" className="py-1.5 font-semibold text-right">
+                    Diff
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        <details className="border rounded-md px-3 py-2" style={{ borderColor: "var(--border)" }}>
-          <summary className="text-[12px] font-medium">Not compared</summary>
-          {contract?.omitted.length ? (
-            <ul className="mt-2 space-y-2">
-              {contract.omitted.map((o) => (
-                <li key={o.name} className="txt-2 text-[12px]">
-                  <span className="font-medium">{o.name}</span>
-                  <span className="txt-3"> — {o.reason}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="txt-3 text-[12px] mt-2">Nothing omitted.</p>
-          )}
-        </details>
+              </thead>
+              <tbody>
+                {series.map((day) => (
+                  <tr key={day.date} className="border-t" style={{ borderColor: "var(--grid)" }}>
+                    <td className="py-1 pr-3 tabular-nums">{day.date}</td>
+                    <td className="py-1 pr-3 text-right tabular-nums">{countText(day.amp)}</td>
+                    <td className="py-1 pr-3 text-right tabular-nums">{countText(day.ai)}</td>
+                    <td className="py-1 text-right">
+                      <DiffValue amp={day.amp} ai={day.ai} tolerance={tolerance} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <section className="mt-5">
+              <h3 className="text-[13px] font-semibold">Example</h3>
+              {sampleError ? (
+                <p className="text-[12px] mt-2" style={{ color: "var(--st-critical-ink)" }}>
+                  {sampleError}
+                </p>
+              ) : sample ? (
+                <>
+                  <p className="txt-2 text-[12px] mt-1">{sampleCaption(sample)}</p>
+                  <table className="w-full text-left border-collapse text-[12px] mt-2">
+                    <thead>
+                      <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
+                        <th scope="col" className="py-1.5 pr-3 font-semibold">
+                          Field
+                        </th>
+                        <th scope="col" className="py-1.5 pr-3 font-semibold">
+                          Amplitude
+                        </th>
+                        <th scope="col" className="py-1.5 font-semibold">
+                          App Intel
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {exampleFieldRows(sample).map((field) => (
+                        <tr key={field.key} className="border-t" style={{ borderColor: "var(--grid)" }}>
+                          <th scope="row" className="py-1 pr-3 font-medium text-left">
+                            {field.label}
+                          </th>
+                          <td className="py-1 pr-3 break-all">{field.amp ?? "—"}</td>
+                          <td className="py-1 break-all">{field.ai ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : (
+                <p className="txt-2 text-[12px] mt-1">Loading example…</p>
+              )}
+            </section>
+          </>
+        ) : null}
       </div>
     </>
   );

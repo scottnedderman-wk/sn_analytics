@@ -1,14 +1,18 @@
 import { expect, test } from "bun:test";
+import { type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import {
-  AppDetail,
-  EventRow,
-  isRefreshAllDisabled,
-  isRefreshBusy,
-} from "./AppDetail";
-import { contractsForRepo } from "@/lib/eventCompare";
+import { VolumeWindowProvider } from "@/app/VolumeWindowContext";
+import { AppDetail, GitHubLine } from "./AppDetail";
 import type { MigrationEvent, RepoRecord } from "@/lib/model";
+
+function renderDetail(node: ReactNode): string {
+  return renderToString(
+    <MemoryRouter>
+      <VolumeWindowProvider onData={() => {}}>{node}</VolumeWindowProvider>
+    </MemoryRouter>,
+  );
+}
 
 const event = (over: Partial<MigrationEvent> = {}): MigrationEvent => ({
   name: "Clicked Save",
@@ -39,83 +43,109 @@ const repo = (over: Partial<RepoRecord> = {}): RepoRecord => ({
   ...over,
 });
 
-const gel = event({ name: "General Experience Loading", legacy: ["GeneralExperienceLoadingEventV2"] });
-const shell = event({ name: "Shell Generic Analytic", legacy: ["ShellGenericAnalyticEventV2"] });
-
-function refreshButtonHtml(html: string, eventName: string): string {
-  const match = html.match(new RegExp(`<button[^>]*aria-label="Refresh comparison for ${eventName}"[^>]*>`));
-  if (!match) throw new Error(`missing refresh button for ${eventName}`);
-  return match[0];
-}
-
-function refreshAllButtonHtml(html: string): string {
-  const match = html.match(/<button[^>]*>Refresh all<\/button>/);
-  if (!match) throw new Error("missing Refresh all button");
-  return match[0];
-}
-
-function hasDisabledAttr(tag: string): boolean {
-  return /\sdisabled(?:=|>|\s)/.test(tag);
-}
-
-test("GEL refresh is enabled and an uncontracted event refresh is disabled", () => {
-  const gelHtml = renderToString(
-    <EventRow ev={gel} query="" row={null} busy={new Set()} onRefresh={() => {}} onInspect={() => {}} />,
-  );
-  const shellHtml = renderToString(
-    <EventRow ev={shell} query="" row={null} busy={new Set()} onRefresh={() => {}} onInspect={() => {}} />,
-  );
-  const otherHtml = renderToString(
-    <EventRow ev={event()} query="" row={null} busy={new Set()} onRefresh={() => {}} onInspect={() => {}} />,
-  );
-  expect(refreshButtonHtml(gelHtml, gel.name)).not.toContain("disabled");
-  expect(refreshButtonHtml(shellHtml, shell.name)).not.toContain("disabled");
-  expect(refreshButtonHtml(otherHtml, event().name)).toContain("disabled");
-});
-
-test("refresh buttons are disabled while busy for all or that event", () => {
-  const allBusy = renderToString(
-    <EventRow ev={gel} query="" row={null} busy={new Set(["*"])} onRefresh={() => {}} onInspect={() => {}} />,
-  );
-  const eventBusy = renderToString(
-    <EventRow
-      ev={gel}
-      query=""
-      row={null}
-      busy={new Set([gel.name])}
-      onRefresh={() => {}}
-      onInspect={() => {}}
+test("GitHub line links each real name to that person's profile", () => {
+  const html = renderToString(
+    <GitHubLine
+      repo="w_outline"
+      contributors={[
+        { name: "Rachael Reimanis", login: "rachaelreimanis-wk" },
+        { name: "Grace Hopper", login: "grace" },
+      ]}
     />,
   );
-  const otherBusy = renderToString(
-    <EventRow ev={gel} query="" row={null} busy={new Set(["other"])} onRefresh={() => {}} onInspect={() => {}} />,
-  );
-  expect(isRefreshBusy(new Set(["*"]), gel.name)).toBe(true);
-  expect(isRefreshBusy(new Set([gel.name]), gel.name)).toBe(true);
-  expect(refreshButtonHtml(allBusy, gel.name)).toContain("disabled");
-  expect(refreshButtonHtml(eventBusy, gel.name)).toContain("disabled");
-  expect(refreshButtonHtml(otherBusy, gel.name)).not.toContain("disabled");
+  const repoLink = html.indexOf('href="https://github.com/Workiva/w_outline"');
+  const person = html.indexOf('href="https://github.com/rachaelreimanis-wk"');
+  expect(repoLink).toBeGreaterThan(-1);
+  expect(person).toBeGreaterThan(repoLink);
+  expect(html).toContain(">Rachael Reimanis</a>");
+  expect(html).toContain('href="https://github.com/grace"');
+  expect(html).toContain(">Grace Hopper</a>");
+
+  const empty = renderToString(<GitHubLine repo="w_outline" contributors={[]} />);
+  expect(empty).toContain(">GitHub ↗</a>");
+  expect(empty).not.toContain("Rachael Reimanis");
 });
 
-test("Refresh all is disabled when the repo has no contracts", () => {
-  expect(contractsForRepo("w_outline")).toEqual([]);
-  expect(isRefreshAllDisabled("w_outline", false)).toBe(true);
-  expect(isRefreshAllDisabled("wdesk_sdk", false)).toBe(false);
-  expect(isRefreshAllDisabled("wdesk_sdk", true)).toBe(true);
+test("detail table omits Usage, GitHub, Match, and the row refresh icon", () => {
+  const html = renderDetail(
+    <AppDetail
+      repo={repo({
+        events: [event({ queried: 4, merged: true, pr: "https://example.com/pr/1" })],
+      })}
+      onTip={() => {}}
+    />,
+  );
+  const amplitude = html.indexOf("Amplitude Event");
+  const ampVol = html.indexOf("Amp Vol");
+  const appIntel = html.indexOf("App Intel Event");
+  const aiVol = html.indexOf("AI Vol");
+  const diff = html.indexOf(">Diff<");
+  const status = html.indexOf(">Status<");
+  expect(amplitude).toBeGreaterThan(-1);
+  expect(ampVol).toBeGreaterThan(amplitude);
+  expect(appIntel).toBeGreaterThan(ampVol);
+  expect(aiVol).toBeGreaterThan(appIntel);
+  expect(diff).toBeGreaterThan(aiVol);
+  expect(status).toBeGreaterThan(diff);
+  expect(html).not.toContain("30d volume");
+  expect(html).not.toContain("New (Amplitude) event");
+  expect(html).not.toContain("Legacy name");
+  expect(html).toContain('aria-label="Inspect Clicked Save"');
+  expect(html).toContain(">events</span>");
+  expect(html).not.toContain("30d events");
+  expect(html).not.toContain("Refresh all");
+  expect(html).not.toContain("Last refreshed");
+  expect(html).not.toContain(">Usage<");
+  expect(html).not.toContain(">GitHub<");
+  expect(html).not.toContain(">Match<");
+  expect(html).not.toContain("Refresh comparison");
+  expect(html).not.toContain("queries");
+  expect(html).not.toContain("https://example.com/pr/1");
+});
 
-  const none = renderToString(
-    <MemoryRouter>
-      <AppDetail repo={repo()} onTip={() => {}} />
-    </MemoryRouter>,
+test("Amp Vol and AI Vol show each event's volumes", () => {
+  const html = renderDetail(
+    <AppDetail repo={repo({ events: [event({ v30: 1000, ai30: 2000 })] })} onTip={() => {}} />,
   );
-  const sdk = renderToString(
-    <MemoryRouter>
-      <AppDetail
-        repo={repo({ repo: "wdesk_sdk", events: [gel], counts: { live: 1 }, total: 1, live: 1 })}
-        onTip={() => {}}
-      />
-    </MemoryRouter>,
+  expect(html).toContain(">1K<");
+  expect(html).toContain(">2K<");
+  expect(html).toContain(">-100%<");
+  expect(html).toContain("color:var(--st-critical-ink)");
+
+  const matched = renderDetail(
+    <AppDetail repo={repo({ events: [event({ v30: 1000, ai30: 1000 })] })} onTip={() => {}} />,
   );
-  expect(hasDisabledAttr(refreshAllButtonHtml(none))).toBe(true);
-  expect(hasDisabledAttr(refreshAllButtonHtml(sdk))).toBe(false);
+  expect(matched).toContain(">0%<");
+  expect(matched).toContain("color:var(--st-good-ink)");
+
+  const missing = renderDetail(
+    <AppDetail repo={repo({ events: [event({ v30: 1000, ai30: null })] })} onTip={() => {}} />,
+  );
+  expect(missing).toContain(">1K<");
+  expect(missing).toContain(">—</span>");
+  expect(missing).not.toContain(">2K<");
+});
+
+test("shared identities are labeled and only unexplained rows can be analyzed", () => {
+  const html = renderDetail(
+    <AppDetail
+      repo={repo({
+        events: [
+          event({ name: "Expand", v30: 1000, ai30: 2000, aiCategory: "outline", aiAction: "expand" }),
+          event({ name: "Collapse", v30: 1000, ai30: 2000, aiCategory: "outline", aiAction: "expand" }),
+          event({ name: "Remove", v30: 1000, ai30: 1400, aiCategory: "outline", aiAction: "remove" }),
+          event({ name: "Cancel", v30: 0, ai30: 50, aiCategory: "outline", aiAction: "cancel" }),
+        ],
+        total: 4,
+      })}
+      onTip={() => {}}
+    />,
+  );
+  expect(html).toContain("Shared with Collapse");
+  expect(html).toContain("Shared with Expand");
+  expect(html).toContain("No Amplitude volume");
+  expect(html).toContain("2 shared identities · 1 no Amplitude volume · 1 unexplained");
+  expect(html).toContain('aria-label="Analyze Remove"');
+  expect(html).not.toContain('aria-label="Analyze Expand"');
+  expect(html).not.toContain('aria-label="Analyze Cancel"');
 });
