@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { MigrationEvent } from "./model";
-import { explainCounts, explainEvent, explainSummary, groupRelatedEvents, reasonText } from "./volumeExplain";
+import { explainCounts, explainEvent, explainSummary, groupRelatedEvents, reasonText, sharedAmpDiff } from "./volumeExplain";
 
 function event(over: Partial<MigrationEvent> = {}): MigrationEvent {
   return {
@@ -63,6 +63,17 @@ test("shared identities stay together at the position of their highest-volume ev
     ["Low", "end"],
     ["After", "none"],
   ]);
+});
+
+test("a shared diff sums Amplitude volume against the one App Intel count", () => {
+  const members = [
+    event({ name: "Initiate", v30: 149000, ai30: 224000 }),
+    event({ name: "Confirm Rename", v30: 76000, ai30: 224000 }),
+    event({ name: "Cancel Rename", v30: 306, ai30: 224000 }),
+    event({ name: "Cancel", v30: 0, ai30: 224000 }),
+    event({ name: "Confirm", v30: 0, ai30: 224000 }),
+  ];
+  expect(sharedAmpDiff(members)).toBe(1);
 });
 
 test("summary counts the rows that still need analysis", () => {

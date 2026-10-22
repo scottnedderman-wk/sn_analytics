@@ -10,6 +10,7 @@ import {
   reasonText,
   type DayVolume,
   type GroupBand,
+  type ShareRole,
 } from "@/lib/volumeExplain";
 import type { RepoContributor } from "@/lib/repoContributors";
 import {
@@ -80,6 +81,9 @@ export function EventRow({
   reason,
   band,
   shade,
+  share,
+  sharedDiff,
+  extraNames,
   onInspect,
   onAnalyze,
 }: {
@@ -89,13 +93,17 @@ export function EventRow({
   reason: string | null;
   band: GroupBand;
   shade: number;
+  share: ShareRole;
+  sharedDiff: number | null;
+  extraNames: string[];
   onInspect: () => void;
   onAnalyze: (() => void) | null;
 }) {
   const ampVol = ev.v30 > 0 ? fmt(ev.v30) : ev.dev30 > 0 ? `${fmt(ev.dev30)} (dev)` : "—";
   const aiVol = ev.ai30 == null ? "—" : fmt(ev.ai30);
-  const diff = ampAiDiffPct(ev.v30, ev.ai30);
+  const diff = share === "lead" ? sharedDiff : share === "own" ? ampAiDiffPct(ev.v30, ev.ai30) : null;
   const tone = diffTone(diff, tolerance);
+  const appIntel = share === "rest" ? extraNames : ev.legacy;
   const tmpl = isTemplateName(ev.name, ev.legacy);
   return (
     <tr
@@ -121,19 +129,25 @@ export function EventRow({
       </td>
       <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">{ampVol}</td>
       <td className="py-1.5 pr-3 align-top txt-3 font-mono text-[11px]">
-        {ev.legacy.length === 0
-          ? "—"
-          : ev.legacy.map((name, index) => (
-              <span key={`${name}-${index}`} className="block whitespace-nowrap">
-                <Highlight text={name} query={query} />
-              </span>
-            ))}
+        {share === "rest" && appIntel.length === 0
+          ? null
+          : appIntel.length === 0
+            ? "—"
+            : appIntel.map((name, index) => (
+                <span key={`${name}-${index}`} className="block whitespace-nowrap">
+                  <Highlight text={name} query={query} />
+                </span>
+              ))}
       </td>
-      <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">{aiVol}</td>
+      <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">
+        {share === "rest" ? null : aiVol}
+      </td>
       <td className="py-1.5 pr-3 align-top text-right">
-        <span className="tabular-nums whitespace-nowrap" style={tone ? { color: DIFF_INK[tone] } : undefined}>
-          {diff == null ? "—" : `${diff}%`}
-        </span>
+        {share === "rest" ? null : (
+          <span className="tabular-nums whitespace-nowrap" style={tone ? { color: DIFF_INK[tone] } : undefined}>
+            {diff == null ? "—" : `${diff}%`}
+          </span>
+        )}
         {reason ? (
           <span className="block txt-3 text-[10.5px] font-normal mt-0.5 ml-auto max-w-[14rem]" style={{ color: "var(--text-secondary)" }}>
             {reason}
@@ -211,19 +225,28 @@ function EventTable({
           </tr>
         </thead>
         <tbody>
-          {groupRelatedEvents(events).map(({ event: e, band, shade }) => {
+          {groupRelatedEvents(events).map(({ event: e, band, shade, share, sharedDiff, extraNames }) => {
             const key = `${e.name}|${e.legacy.join(",")}`;
             const explanation = reasons.get(key);
-            const shared = explanation?.kind === "shared";
+            const noAmplitude = explanation?.kind === "no-amplitude";
             return (
               <EventRow
                 key={key}
                 ev={e}
                 query={query}
                 tolerance={tolerance}
-                reason={shared ? (band === "start" ? "Shared" : null) : explanation ? reasonText(explanation) : null}
+                reason={
+                  noAmplitude
+                    ? "No Amplitude volume"
+                    : share === "own" && explanation
+                      ? reasonText(explanation)
+                      : null
+                }
                 band={band}
                 shade={shade}
+                share={share}
+                sharedDiff={sharedDiff}
+                extraNames={extraNames}
                 onInspect={() => onInspect(e)}
                 onAnalyze={explanation?.kind === "unexplained" ? () => onAnalyze(e) : null}
               />

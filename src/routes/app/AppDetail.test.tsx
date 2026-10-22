@@ -141,8 +141,8 @@ test("shared identities are labeled and only unexplained rows can be analyzed", 
       onTip={() => {}}
     />,
   );
-  expect(html).toContain(">Shared<");
-  expect(html).not.toContain("Shared with");
+  expect(html).toContain(">0%<");
+  expect(html).not.toContain(">Shared<");
   expect(html).toContain("No Amplitude volume");
   expect(html).toContain("2 shared identities · 1 no Amplitude volume · 1 unexplained");
   expect(html).toContain('aria-label="Analyze Remove"');
@@ -155,6 +155,65 @@ test("shared identities are labeled and only unexplained rows can be analyzed", 
   expect(html.slice(start, end)).toContain("Collapse");
   expect(html.slice(start, end)).not.toContain("Remove");
   expect(html.indexOf(">Collapse<")).toBeLessThan(html.indexOf(">Expand<"));
+});
+
+test("a shared group shows one summed diff and keeps zero-amplitude rows labeled", () => {
+  const html = renderDetail(
+    <AppDetail
+      repo={repo({
+        events: [
+          event({
+            name: "Initiate",
+            v30: 149000,
+            ai30: 224000,
+            legacy: ["OutlineRenameNodeEventV1"],
+            aiCategory: "outline",
+            aiAction: "rename-node",
+          }),
+          event({
+            name: "Confirm Rename",
+            v30: 76000,
+            ai30: 224000,
+            legacy: ["OutlineRenameNodeEventV1"],
+            aiCategory: "outline",
+            aiAction: "rename-node",
+          }),
+          event({
+            name: "Cancel Rename",
+            v30: 306,
+            ai30: 224000,
+            legacy: ["OutlineRenameNodeEventV1"],
+            aiCategory: "outline",
+            aiAction: "rename-node",
+          }),
+          event({
+            name: "Cancel",
+            v30: 0,
+            ai30: 224000,
+            legacy: ["OutlineRenameNodeEventV1"],
+            aiCategory: "outline",
+            aiAction: "rename-node",
+          }),
+          event({
+            name: "As Child",
+            v30: 0,
+            ai30: 224000,
+            legacy: ["OutlineRenameNodeEventV1", "OutlineRearrangeNodeEventV1"],
+            aiCategory: "outline",
+            aiAction: "rename-node",
+          }),
+        ],
+        total: 5,
+      })}
+      onTip={() => {}}
+    />,
+  );
+  expect(html).toContain(">1%<");
+  expect(html).toContain("color:var(--st-good-ink)");
+  expect(html.match(/OutlineRenameNodeEventV1/g)).toHaveLength(1);
+  expect(html.match(/>224K</g)).toHaveLength(1);
+  expect(html).toContain(">OutlineRearrangeNodeEventV1</span>");
+  expect(html.match(/No Amplitude volume/g)).toHaveLength(2);
 });
 
 test("App Intel event names each sit on their own line", () => {

@@ -103,11 +103,23 @@ export function explainSummary(counts: ExplainCounts): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
-export type GroupBand = "none" | "start" | "middle" | "end";
+export function sharedAmpDiff(members: MigrationEvent[]): number | null {
+  const amp = members.reduce((sum, item) => sum + item.v30, 0);
+  const ai = members.find((item) => item.ai30 != null)?.ai30 ?? null;
+  return diffPct(amp, ai);
+}
 
-export function groupRelatedEvents(
-  events: MigrationEvent[],
-): Array<{ event: MigrationEvent; band: GroupBand; shade: number }> {
+export type GroupBand = "none" | "start" | "middle" | "end";
+export type ShareRole = "own" | "lead" | "rest";
+
+export function groupRelatedEvents(events: MigrationEvent[]): Array<{
+  event: MigrationEvent;
+  band: GroupBand;
+  shade: number;
+  share: ShareRole;
+  sharedDiff: number | null;
+  extraNames: string[];
+}> {
   const counts = new Map<string, number>();
   for (const event of events) {
     const key = identityKey(event);
@@ -115,13 +127,20 @@ export function groupRelatedEvents(
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   const placed = new Set<string>();
-  const out: Array<{ event: MigrationEvent; band: GroupBand; shade: number }> = [];
+  const out: Array<{
+    event: MigrationEvent;
+    band: GroupBand;
+    shade: number;
+    share: ShareRole;
+    sharedDiff: number | null;
+    extraNames: string[];
+  }> = [];
   let shade = 0;
   for (const event of events) {
     const key = identityKey(event);
     const related = key != null && (counts.get(key) ?? 0) > 1;
     if (!related || !key) {
-      out.push({ event, band: "none", shade: 0 });
+      out.push({ event, band: "none", shade: 0, share: "own", sharedDiff: null, extraNames: [] });
       continue;
     }
     if (placed.has(key)) continue;
@@ -129,9 +148,18 @@ export function groupRelatedEvents(
     const groupShade = shade % 2;
     shade += 1;
     const members = events.filter((item) => identityKey(item) === key);
+    const sharedDiff = sharedAmpDiff(members);
+    const leadNames = new Set(members[0]?.legacy ?? []);
     members.forEach((member, index) => {
       const band: GroupBand = index === 0 ? "start" : index === members.length - 1 ? "end" : "middle";
-      out.push({ event: member, band, shade: groupShade });
+      out.push({
+        event: member,
+        band,
+        shade: groupShade,
+        share: index === 0 ? "lead" : "rest",
+        sharedDiff,
+        extraNames: index === 0 ? [] : member.legacy.filter((name) => !leadNames.has(name)),
+      });
     });
   }
   return out;
