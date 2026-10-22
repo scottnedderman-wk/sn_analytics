@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useVolumeWindow } from "@/app/VolumeWindowContext";
 import { DIFF_INK, ampAiDiffPct, diffTone } from "@/routes/dashboard/AppSummary";
 import { eventVolumeSeries } from "@/lib/eventVolumeCache";
-import { explainCounts, explainEvent, explainSummary, reasonText, type DayVolume } from "@/lib/volumeExplain";
+import {
+  explainCounts,
+  explainEvent,
+  explainSummary,
+  groupRelatedEvents,
+  reasonText,
+  type DayVolume,
+  type GroupBand,
+} from "@/lib/volumeExplain";
 import type { RepoContributor } from "@/lib/repoContributors";
 import {
   fmt,
@@ -57,6 +65,10 @@ export function GitHubLine({
   );
 }
 
+function bandFill(shade: number): string {
+  return shade % 2 === 0 ? "var(--surface-2)" : "var(--surface-3)";
+}
+
 function iconBtnClass(disabled: boolean): string {
   return `inline-flex items-center justify-center rounded p-1 ${disabled ? "opacity-40" : "hover:opacity-70"}`;
 }
@@ -66,6 +78,8 @@ export function EventRow({
   query,
   tolerance,
   reason,
+  band,
+  shade,
   onInspect,
   onAnalyze,
 }: {
@@ -73,17 +87,25 @@ export function EventRow({
   query: string;
   tolerance: number;
   reason: string | null;
+  band: GroupBand;
+  shade: number;
   onInspect: () => void;
   onAnalyze: (() => void) | null;
 }) {
-  const legacy = ev.legacy.length ? ev.legacy.join(", ") : "—";
   const ampVol = ev.v30 > 0 ? fmt(ev.v30) : ev.dev30 > 0 ? `${fmt(ev.dev30)} (dev)` : "—";
   const aiVol = ev.ai30 == null ? "—" : fmt(ev.ai30);
   const diff = ampAiDiffPct(ev.v30, ev.ai30);
   const tone = diffTone(diff, tolerance);
   const tmpl = isTemplateName(ev.name, ev.legacy);
   return (
-    <tr className="border-t" style={{ borderColor: "var(--grid)" }}>
+    <tr
+      className={band === "middle" || band === "end" ? undefined : "border-t"}
+      data-group={band}
+      style={{
+        borderColor: "var(--grid)",
+        background: band === "none" ? undefined : bandFill(shade),
+      }}
+    >
       <td className="py-1.5 pr-3 align-top">
         <span className="font-medium">
           <Highlight text={ev.name} query={query} />
@@ -98,8 +120,14 @@ export function EventRow({
         ) : null}
       </td>
       <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">{ampVol}</td>
-      <td className="py-1.5 pr-3 align-top txt-3 font-mono text-[11px] break-all">
-        <Highlight text={legacy} query={query} />
+      <td className="py-1.5 pr-3 align-top txt-3 font-mono text-[11px]">
+        {ev.legacy.length === 0
+          ? "—"
+          : ev.legacy.map((name, index) => (
+              <span key={`${name}-${index}`} className="block whitespace-nowrap">
+                <Highlight text={name} query={query} />
+              </span>
+            ))}
       </td>
       <td className="py-1.5 pr-3 align-top text-right tabular-nums whitespace-nowrap">{aiVol}</td>
       <td className="py-1.5 pr-3 align-top text-right">
@@ -183,16 +211,19 @@ function EventTable({
           </tr>
         </thead>
         <tbody>
-          {events.map((e) => {
+          {groupRelatedEvents(events).map(({ event: e, band, shade }) => {
             const key = `${e.name}|${e.legacy.join(",")}`;
             const explanation = reasons.get(key);
+            const shared = explanation?.kind === "shared";
             return (
               <EventRow
                 key={key}
                 ev={e}
                 query={query}
                 tolerance={tolerance}
-                reason={explanation ? reasonText(explanation) : null}
+                reason={shared ? (band === "start" ? "Shared" : null) : explanation ? reasonText(explanation) : null}
+                band={band}
+                shade={shade}
                 onInspect={() => onInspect(e)}
                 onAnalyze={explanation?.kind === "unexplained" ? () => onAnalyze(e) : null}
               />

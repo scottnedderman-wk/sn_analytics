@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { MigrationEvent } from "./model";
-import { explainCounts, explainEvent, explainSummary, reasonText } from "./volumeExplain";
+import { explainCounts, explainEvent, explainSummary, groupRelatedEvents, reasonText } from "./volumeExplain";
 
 function event(over: Partial<MigrationEvent> = {}): MigrationEvent {
   return {
@@ -49,6 +49,20 @@ test("zero Amplitude with App Intel volume is its own reason", () => {
   const reason = explainEvent(row, [row], null, 5);
   expect(reason.kind).toBe("no-amplitude");
   expect(reasonText(reason)).toBe("No Amplitude volume");
+});
+
+test("shared identities stay together at the position of their highest-volume event", () => {
+  const solo = event({ name: "Solo", v30: 5000, aiCategory: "outline", aiAction: "solo" });
+  const low = event({ name: "Low", v30: 10, aiCategory: "outline", aiAction: "move" });
+  const high = event({ name: "High", v30: 800, aiCategory: "outline", aiAction: "move" });
+  const after = event({ name: "After", v30: 100, aiCategory: "outline", aiAction: "after" });
+  const grouped = groupRelatedEvents([solo, high, after, low]);
+  expect(grouped.map((item) => [item.event.name, item.band])).toEqual([
+    ["Solo", "none"],
+    ["High", "start"],
+    ["Low", "end"],
+    ["After", "none"],
+  ]);
 });
 
 test("summary counts the rows that still need analysis", () => {

@@ -141,11 +141,32 @@ test("shared identities are labeled and only unexplained rows can be analyzed", 
       onTip={() => {}}
     />,
   );
-  expect(html).toContain("Shared with Collapse");
-  expect(html).toContain("Shared with Expand");
+  expect(html).toContain(">Shared<");
+  expect(html).not.toContain("Shared with");
   expect(html).toContain("No Amplitude volume");
   expect(html).toContain("2 shared identities · 1 no Amplitude volume · 1 unexplained");
   expect(html).toContain('aria-label="Analyze Remove"');
   expect(html).not.toContain('aria-label="Analyze Expand"');
   expect(html).not.toContain('aria-label="Analyze Cancel"');
+  const start = html.indexOf('data-group="start"');
+  const end = html.indexOf('data-group="end"');
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  expect(html.slice(start, end)).toContain("Collapse");
+  expect(html.slice(start, end)).not.toContain("Remove");
+  expect(html.indexOf(">Collapse<")).toBeLessThan(html.indexOf(">Expand<"));
+});
+
+test("App Intel event names each sit on their own line", () => {
+  const html = renderDetail(
+    <AppDetail
+      repo={repo({
+        events: [event({ legacy: ["OutlineAddNewNodeEventV1", "OutlineRearrangeNodeEventV1"] })],
+      })}
+      onTip={() => {}}
+    />,
+  );
+  expect(html).toContain(">OutlineAddNewNodeEventV1</span>");
+  expect(html).toContain(">OutlineRearrangeNodeEventV1</span>");
+  expect(html).not.toContain("OutlineAddNewNodeEventV1, OutlineRearrangeNodeEventV1");
 });

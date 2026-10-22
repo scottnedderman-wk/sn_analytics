@@ -103,6 +103,40 @@ export function explainSummary(counts: ExplainCounts): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
+export type GroupBand = "none" | "start" | "middle" | "end";
+
+export function groupRelatedEvents(
+  events: MigrationEvent[],
+): Array<{ event: MigrationEvent; band: GroupBand; shade: number }> {
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    const key = identityKey(event);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const placed = new Set<string>();
+  const out: Array<{ event: MigrationEvent; band: GroupBand; shade: number }> = [];
+  let shade = 0;
+  for (const event of events) {
+    const key = identityKey(event);
+    const related = key != null && (counts.get(key) ?? 0) > 1;
+    if (!related || !key) {
+      out.push({ event, band: "none", shade: 0 });
+      continue;
+    }
+    if (placed.has(key)) continue;
+    placed.add(key);
+    const groupShade = shade % 2;
+    shade += 1;
+    const members = events.filter((item) => identityKey(item) === key);
+    members.forEach((member, index) => {
+      const band: GroupBand = index === 0 ? "start" : index === members.length - 1 ? "end" : "middle";
+      out.push({ event: member, band, shade: groupShade });
+    });
+  }
+  return out;
+}
+
 export function dominantGapDay(days: DayVolume[]): string | null {
   let best: DayVolume | null = null;
   let bestGap = 0;
