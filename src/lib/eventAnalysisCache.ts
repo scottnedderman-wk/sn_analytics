@@ -19,6 +19,34 @@ export function putEventAnalysis(
   );
 }
 
+function analysisFromJson(json: string): EventAnalysis | null {
+  try {
+    const parsed = JSON.parse(json) as EventAnalysis;
+    return Array.isArray(parsed.sections) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function cachedAnalysisEventNames(db: Database, repo: string, window: DayWindow): string[] {
+  const rows = db
+    .query(
+      `SELECT event_name, result_json
+       FROM event_analysis
+       WHERE repo = ? AND day >= ? AND day <= ?
+       ORDER BY day DESC`,
+    )
+    .all(repo, window.start, window.end) as { event_name: string; result_json: string }[];
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const row of rows) {
+    if (seen.has(row.event_name)) continue;
+    seen.add(row.event_name);
+    if (analysisFromJson(row.result_json)) names.push(row.event_name);
+  }
+  return names.sort((a, b) => a.localeCompare(b));
+}
+
 export function findEventAnalysis(
   db: Database,
   repo: string,
@@ -35,7 +63,7 @@ export function findEventAnalysis(
     )
     .get(repo, eventName, window.start, window.end) as { result_json: string } | null;
   if (!row) return null;
-  return JSON.parse(row.result_json) as EventAnalysis;
+  return analysisFromJson(row.result_json);
 }
 
 export async function loadCachedEventAnalysis(
@@ -48,7 +76,9 @@ export async function loadCachedEventAnalysis(
 ): Promise<EventAnalysis> {
   const cached = findEventAnalysis(db, repo, eventName, window);
   if (cached) return cached;
+  const started = Date.now();
   const analysis = await load();
-  putEventAnalysis(db, repo, eventName, analysis, now());
-  return analysis;
+  const recorded = { ...analysis, durationMs: Date.now() - started };
+  putEventAnalysis(db, repo, eventName, recorded, now());
+  return recorded;
 }

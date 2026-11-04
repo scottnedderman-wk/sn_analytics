@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openAppDatabase } from "./db";
-import { findEventExample, loadCachedEventSample, putEventExample } from "./eventExampleCache";
+import { cachedExampleEventNames, findEventExample, loadCachedEventSample, putEventExample } from "./eventExampleCache";
 import type { EventSample } from "./eventSample";
 import type { MigrationEvent } from "./model";
 
@@ -61,6 +61,8 @@ test("an example saved for one day is reused anywhere that day sits in the windo
     expect(findEventExample(db, "w_outline", "Rename Outline Title", { start: "2026-08-17", end: "2026-08-19" })).toEqual(sample);
     expect(findEventExample(db, "w_outline", "Rename Outline Title", { start: "2026-08-19", end: "2026-08-20" })?.ai?.duration).toBe("12");
     expect(findEventExample(db, "w_outline", "Rename Outline Title", { start: "2026-08-17", end: "2026-08-18" })).toBeNull();
+    expect(cachedExampleEventNames(db, "w_outline", { start: "2026-08-17", end: "2026-08-20" })).toEqual(["Rename Outline Title"]);
+    expect(cachedExampleEventNames(db, "w_outline", { start: "2026-08-17", end: "2026-08-18" })).toEqual([]);
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

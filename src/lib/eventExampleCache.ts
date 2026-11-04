@@ -42,6 +42,38 @@ export function putEventExample(
   );
 }
 
+function sampleFromRow(row: { paired: number; amp_json: string | null; ai_json: string | null }): EventSample | null {
+  const amp = parseSide(row.amp_json);
+  const ai = parseSide(row.ai_json);
+  if (amp === undefined || ai === undefined) return null;
+  return { paired: row.paired === 1, amp, ai };
+}
+
+export function cachedExampleEventNames(db: Database, repo: string, window: DayWindow): string[] {
+  const rows = db
+    .query(
+      `SELECT event_name, paired, amp_json, ai_json
+       FROM event_examples
+       WHERE repo = ? AND day >= ? AND day <= ?
+       ORDER BY day DESC`,
+    )
+    .all(repo, window.start, window.end) as {
+    event_name: string;
+    paired: number;
+    amp_json: string | null;
+    ai_json: string | null;
+  }[];
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const row of rows) {
+    if (seen.has(row.event_name)) continue;
+    seen.add(row.event_name);
+    const sample = sampleFromRow(row);
+    if (sample?.amp || sample?.ai) names.push(row.event_name);
+  }
+  return names.sort((a, b) => a.localeCompare(b));
+}
+
 export function findEventExample(
   db: Database,
   repo: string,
@@ -60,10 +92,7 @@ export function findEventExample(
     | { paired: number; amp_json: string | null; ai_json: string | null }
     | null;
   if (!row) return null;
-  const amp = parseSide(row.amp_json);
-  const ai = parseSide(row.ai_json);
-  if (amp === undefined || ai === undefined) return null;
-  return { paired: row.paired === 1, amp, ai };
+  return sampleFromRow(row);
 }
 
 export async function loadCachedEventSample(

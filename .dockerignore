@@ -1,0 +1,15 @@
+node_modules
+.git
+.github
+dist
+out
+coverage
+.env
+.env.*
+infra
+.cursor
+.superpowers
+docs
+data/*.sqlite
+data/*.sqlite-*
+*.md

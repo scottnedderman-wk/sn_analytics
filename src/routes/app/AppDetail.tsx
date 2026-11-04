@@ -23,9 +23,10 @@ import {
   type MigrationEvent,
   type RepoRecord,
 } from "@/lib/model";
-import { AnalyzeIcon, Badge, Highlight, InternalLink, MagnifyIcon, Meter, UnassessableNote } from "@/components/ui";
+import { AnalyzeIcon, Badge, ExampleIcon, Highlight, InternalLink, MagnifyIcon, Meter, UnassessableNote } from "@/components/ui";
 import { EventAnalysisModal } from "./EventAnalysisModal";
 import { EventCompareModal } from "./EventCompareModal";
+import { EventExampleModal } from "./EventExampleModal";
 
 export function GitHubLine({
   repo,
@@ -84,6 +85,9 @@ export function EventRow({
   share,
   sharedDiff,
   extraNames,
+  analysisCached,
+  exampleCached,
+  onExample,
   onInspect,
   onAnalyze,
 }: {
@@ -96,6 +100,9 @@ export function EventRow({
   share: ShareRole;
   sharedDiff: number | null;
   extraNames: string[];
+  analysisCached?: boolean;
+  exampleCached?: boolean;
+  onExample: () => void;
   onInspect: () => void;
   onAnalyze: (() => void) | null;
 }) {
@@ -160,14 +167,32 @@ export function EventRow({
       <td className="py-1.5 align-top text-right whitespace-nowrap">
         <span className="inline-flex items-center gap-1">
           {onAnalyze ? (
-            <button type="button" className={iconBtnClass(false)} aria-label={`Analyze ${ev.name}`} onClick={onAnalyze}>
+            <button
+              type="button"
+              className={iconBtnClass(false)}
+              aria-label={`Analyze ${ev.name}`}
+              title="Analyze why this volume is outside tolerance"
+              style={analysisCached ? { color: "var(--st-good-ink)" } : undefined}
+              onClick={onAnalyze}
+            >
               <AnalyzeIcon />
             </button>
           ) : null}
           <button
             type="button"
             className={iconBtnClass(false)}
+            aria-label={`Example ${ev.name}`}
+            title="Show an example event from both systems"
+            style={exampleCached ? { color: "var(--st-good-ink)" } : undefined}
+            onClick={onExample}
+          >
+            <ExampleIcon />
+          </button>
+          <button
+            type="button"
+            className={iconBtnClass(false)}
             aria-label={`Inspect ${ev.name}`}
+            title="Compare daily Amplitude and App Intel volume"
             onClick={onInspect}
           >
             <MagnifyIcon />
@@ -184,6 +209,9 @@ function EventTable({
   query,
   tolerance,
   reasons,
+  cachedAnalyses,
+  cachedExamples,
+  onExample,
   onInspect,
   onAnalyze,
 }: {
@@ -192,6 +220,9 @@ function EventTable({
   query: string;
   tolerance: number;
   reasons: Map<string, ReturnType<typeof explainEvent>>;
+  cachedAnalyses: ReadonlySet<string>;
+  cachedExamples: ReadonlySet<string>;
+  onExample: (ev: MigrationEvent) => void;
   onInspect: (ev: MigrationEvent) => void;
   onAnalyze: (ev: MigrationEvent) => void;
 }) {
@@ -247,6 +278,9 @@ function EventTable({
                 share={share}
                 sharedDiff={sharedDiff}
                 extraNames={extraNames}
+                analysisCached={cachedAnalyses.has(e.name)}
+                exampleCached={cachedExamples.has(e.name)}
+                onExample={() => onExample(e)}
                 onInspect={() => onInspect(e)}
                 onAnalyze={explanation?.kind === "unexplained" ? () => onAnalyze(e) : null}
               />
@@ -275,8 +309,11 @@ export function AppDetail({
   const events = sortEvents(r.events, "volume");
   const [contributors, setContributors] = useState<RepoContributor[]>([]);
   const [inspecting, setInspecting] = useState<MigrationEvent | null>(null);
+  const [sampling, setSampling] = useState<MigrationEvent | null>(null);
   const [analyzing, setAnalyzing] = useState<MigrationEvent | null>(null);
   const [daily, setDaily] = useState<Array<{ eventName: string; source: "amp" | "ai"; day: string; count: number }>>([]);
+  const [cachedAnalyses, setCachedAnalyses] = useState<ReadonlySet<string>>(new Set());
+  const [cachedExamples, setCachedExamples] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     if (!applied) {
@@ -295,6 +332,37 @@ export function AppDetail({
       cancelled = true;
     };
   }, [r.repo, applied]);
+
+  useEffect(() => {
+    if (!applied) {
+      setCachedAnalyses(new Set());
+      setCachedExamples(new Set());
+      return;
+    }
+    let cancelled = false;
+    const params = new URLSearchParams({ start: applied.start, end: applied.end });
+    fetch(`/api/repos/${encodeURIComponent(r.repo)}/cached-events?${params}`)
+      .then((res) => res.json() as Promise<{ analyses?: string[]; examples?: string[] }>)
+      .then((body) => {
+        if (cancelled) return;
+        setCachedAnalyses(new Set(body.analyses ?? []));
+        setCachedExamples(new Set(body.examples ?? []));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [r.repo, applied]);
+
+  function rememberCached(kind: "analysis" | "example", name: string) {
+    const update = kind === "analysis" ? setCachedAnalyses : setCachedExamples;
+    update((current) => {
+      if (current.has(name)) return current;
+      const next = new Set(current);
+      next.add(name);
+      return next;
+    });
+  }
 
   const reasons = useMemo(() => {
     const map = new Map<string, ReturnType<typeof explainEvent>>();
@@ -373,11 +441,23 @@ export function AppDetail({
             query=""
             tolerance={tolerance}
             reasons={reasons}
+            cachedAnalyses={cachedAnalyses}
+            cachedExamples={cachedExamples}
+            onExample={setSampling}
             onInspect={setInspecting}
             onAnalyze={setAnalyzing}
           />
         )}
       </section>
+      {sampling ? (
+        <EventExampleModal
+          event={sampling}
+          repo={r.repo}
+          applied={applied}
+          onCached={() => rememberCached("example", sampling.name)}
+          onClose={() => setSampling(null)}
+        />
+      ) : null}
       {inspecting ? (
         <EventCompareModal
           event={inspecting}
@@ -393,6 +473,7 @@ export function AppDetail({
           repo={r.repo}
           applied={applied}
           tolerance={tolerance}
+          onCached={() => rememberCached("analysis", analyzing.name)}
           onClose={() => setAnalyzing(null)}
         />
       ) : null}

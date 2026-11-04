@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import type { EventSample } from "@/lib/eventSample";
 import { renderToString } from "react-dom/server";
 import type { MigrationEvent } from "@/lib/model";
 import { EventCompareModal } from "./EventCompareModal";
@@ -49,60 +48,10 @@ test("modal lists each day in the applied window with the same diff coloring", (
   expect(html).toContain("color:var(--st-good-ink)");
   expect(html).toContain("w-[80vw]");
   expect(html).not.toContain("pending");
+  expect(html).not.toContain("Example");
+  expect(html).not.toContain("Loading example");
   expect(html).not.toContain("Comparable fields");
   expect(html).not.toContain("Last refreshed");
-});
-
-const paired: EventSample = {
-  paired: true,
-  amp: {
-    eventTime: "2026-08-19 15:01:02",
-    user: "user-1",
-    organization: "org-1",
-    workspace: "ws-1",
-    duration: "12",
-    environment: "us",
-    pageUrl: "https://app.example/a",
-    host: "app.example",
-    properties: { experienceName: "Outline" },
-  },
-  ai: {
-    eventTime: "2026-08-19 15:01:02",
-    user: "user-1",
-    organization: "org-1",
-    workspace: "ws-1",
-    duration: "12",
-    environment: "production",
-    pageUrl: "https://app.example/a",
-    host: "app.example",
-    properties: { browser: "Chrome", os: "macOS" },
-  },
-};
-
-test("modal shows one paired example side by side", () => {
-  const html = renderToString(
-    <EventCompareModal
-      event={event()}
-      repo="w_outline"
-      applied={{ start: "2026-08-17", end: "2026-08-19" }}
-      tolerance={5}
-      days={[{ date: "2026-08-19", amp: 1, ai: 1 }]}
-      sample={paired}
-      onClose={() => {}}
-    />,
-  );
-  expect(html).toContain("Same event in Amplitude and App Intel.");
-  expect(html).toContain("user-1");
-  expect(html).toContain("production");
-  expect(html).toContain("experienceName");
-  expect(html).toContain("Outline");
-  expect(html).toContain("browser");
-  expect(html).toContain("Chrome");
-  expect(html).toContain("os");
-  expect(html).toContain("macOS");
-  expect(html.indexOf(">experienceName<")).toBeLessThan(html.indexOf(">Outline<"));
-  expect(html.indexOf(">Amplitude<")).toBeLessThan(html.indexOf(">App Intel<"));
-  expect(html).not.toContain("Loading example");
 });
 
 test("modal leaves App Intel blank when the event has no identity", () => {

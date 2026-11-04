@@ -3,7 +3,7 @@ import { type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { VolumeWindowProvider } from "@/app/VolumeWindowContext";
-import { AppDetail, GitHubLine } from "./AppDetail";
+import { AppDetail, EventRow, GitHubLine } from "./AppDetail";
 import type { MigrationEvent, RepoRecord } from "@/lib/model";
 
 function renderDetail(node: ReactNode): string {
@@ -90,7 +90,11 @@ test("detail table omits Usage, GitHub, Match, and the row refresh icon", () => 
   expect(html).not.toContain("30d volume");
   expect(html).not.toContain("New (Amplitude) event");
   expect(html).not.toContain("Legacy name");
+  expect(html).toContain('aria-label="Example Clicked Save"');
   expect(html).toContain('aria-label="Inspect Clicked Save"');
+  expect(html).toContain('title="Show an example event from both systems"');
+  expect(html).toContain('title="Compare daily Amplitude and App Intel volume"');
+  expect(html.indexOf('aria-label="Example Clicked Save"')).toBeLessThan(html.indexOf('aria-label="Inspect Clicked Save"'));
   expect(html).toContain(">events</span>");
   expect(html).not.toContain("30d events");
   expect(html).not.toContain("Refresh all");
@@ -146,6 +150,7 @@ test("shared identities are labeled and only unexplained rows can be analyzed", 
   expect(html).toContain("No Amplitude volume");
   expect(html).toContain("2 shared identities · 1 no Amplitude volume · 1 unexplained");
   expect(html).toContain('aria-label="Analyze Remove"');
+  expect(html).toContain('title="Analyze why this volume is outside tolerance"');
   expect(html).not.toContain('aria-label="Analyze Expand"');
   expect(html).not.toContain('aria-label="Analyze Cancel"');
   const start = html.indexOf('data-group="start"');
@@ -228,4 +233,41 @@ test("App Intel event names each sit on their own line", () => {
   expect(html).toContain(">OutlineAddNewNodeEventV1</span>");
   expect(html).toContain(">OutlineRearrangeNodeEventV1</span>");
   expect(html).not.toContain("OutlineAddNewNodeEventV1, OutlineRearrangeNodeEventV1");
+});
+
+function buttonOpenTag(html: string, label: string): string {
+  const start = html.indexOf(`aria-label="${label}"`);
+  const tag = html.lastIndexOf("<button", start);
+  return html.slice(tag, html.indexOf(">", start));
+}
+
+test("cached analysis and example icons are green", () => {
+  const row = (cached: { analysis?: boolean; example?: boolean }) =>
+    renderToString(
+      <EventRow
+        ev={event({ name: "Open Workspace", v30: 100, ai30: 140 })}
+        query=""
+        tolerance={5}
+        reason={null}
+        band="none"
+        shade={0}
+        share="own"
+        sharedDiff={null}
+        extraNames={[]}
+        onExample={() => {}}
+        onInspect={() => {}}
+        onAnalyze={() => {}}
+        analysisCached={cached.analysis}
+        exampleCached={cached.example}
+      />,
+    );
+
+  const cached = row({ analysis: true, example: true });
+  expect(buttonOpenTag(cached, "Analyze Open Workspace")).toContain("color:var(--st-good-ink)");
+  expect(buttonOpenTag(cached, "Example Open Workspace")).toContain("color:var(--st-good-ink)");
+  expect(buttonOpenTag(cached, "Inspect Open Workspace")).not.toContain("color:var(--st-good-ink)");
+
+  const fresh = row({});
+  expect(buttonOpenTag(fresh, "Analyze Open Workspace")).not.toContain("color:var(--st-good-ink)");
+  expect(buttonOpenTag(fresh, "Example Open Workspace")).not.toContain("color:var(--st-good-ink)");
 });

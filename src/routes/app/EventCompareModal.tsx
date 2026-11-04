@@ -1,20 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { DIFF_INK, ampAiDiffPct, diffTone } from "@/routes/dashboard/AppSummary";
-import { exampleFieldRows, type EventSample } from "@/lib/eventSample";
 import { eventVolumeSeries, type EventDayVolume } from "@/lib/eventVolumeCache";
 import type { MigrationEvent } from "@/lib/model";
 import type { DayWindow } from "@/lib/volumeWindow";
 
 function countText(n: number | null): string {
   return n == null ? "—" : n.toLocaleString("en-US");
-}
-
-function sampleCaption(sample: EventSample): string {
-  if (sample.paired) return "Same event in Amplitude and App Intel.";
-  if (sample.amp && sample.ai) return "One example from each system in this window.";
-  if (sample.amp) return "Amplitude example from this window.";
-  if (sample.ai) return "App Intel example from this window.";
-  return "No events in this window.";
 }
 
 function DiffValue({ amp, ai, tolerance }: { amp: number; ai: number | null; tolerance: number }) {
@@ -33,7 +24,6 @@ export function EventCompareModal({
   applied,
   tolerance,
   days,
-  sample: sampleProp,
   onClose,
 }: {
   event: MigrationEvent;
@@ -41,7 +31,6 @@ export function EventCompareModal({
   applied: DayWindow | null;
   tolerance: number;
   days?: EventDayVolume[];
-  sample?: EventSample | null;
   onClose: () => void;
 }): JSX.Element {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -50,8 +39,6 @@ export function EventCompareModal({
   const headingId = "event-compare-title";
   const [loaded, setLoaded] = useState<EventDayVolume[] | null>(days ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [sample, setSample] = useState<EventSample | null>(sampleProp ?? null);
-  const [sampleError, setSampleError] = useState<string | null>(null);
   const subtitle = event.legacy.length ? event.legacy.join(", ") : "—";
   const series = days ?? loaded;
   const ampTotal = series?.reduce((sum, day) => sum + day.amp, 0) ?? 0;
@@ -92,29 +79,6 @@ export function EventCompareModal({
       cancelled = true;
     };
   }, [days, applied, repo, event.name, event.ai30]);
-
-  useEffect(() => {
-    if (sampleProp !== undefined || !applied) return;
-    let cancelled = false;
-    setSample(null);
-    setSampleError(null);
-    const params = new URLSearchParams({ start: applied.start, end: applied.end });
-    fetch(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/sample?${params}`)
-      .then(async (res) => {
-        const body = (await res.json()) as EventSample & { error?: string };
-        if (!res.ok) throw new Error(body.error ?? res.statusText);
-        return body;
-      })
-      .then((body) => {
-        if (!cancelled) setSample(body);
-      })
-      .catch((err) => {
-        if (!cancelled) setSampleError(err instanceof Error ? err.message : String(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sampleProp, applied, repo, event.name]);
 
   return (
     <>
@@ -209,46 +173,6 @@ export function EventCompareModal({
                 ))}
               </tbody>
             </table>
-            <section className="mt-5">
-              <h3 className="text-[13px] font-semibold">Example</h3>
-              {sampleError ? (
-                <p className="text-[12px] mt-2" style={{ color: "var(--st-critical-ink)" }}>
-                  {sampleError}
-                </p>
-              ) : sample ? (
-                <>
-                  <p className="txt-2 text-[12px] mt-1">{sampleCaption(sample)}</p>
-                  <table className="w-full text-left border-collapse text-[12px] mt-2">
-                    <thead>
-                      <tr className="txt-3 text-[10.5px] uppercase tracking-wider">
-                        <th scope="col" className="py-1.5 pr-3 font-semibold">
-                          Field
-                        </th>
-                        <th scope="col" className="py-1.5 pr-3 font-semibold">
-                          Amplitude
-                        </th>
-                        <th scope="col" className="py-1.5 font-semibold">
-                          App Intel
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {exampleFieldRows(sample).map((field) => (
-                        <tr key={field.key} className="border-t" style={{ borderColor: "var(--grid)" }}>
-                          <th scope="row" className="py-1 pr-3 font-medium text-left">
-                            {field.label}
-                          </th>
-                          <td className="py-1 pr-3 break-all">{field.amp ?? "—"}</td>
-                          <td className="py-1 break-all">{field.ai ?? "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              ) : (
-                <p className="txt-2 text-[12px] mt-1">Loading example…</p>
-              )}
-            </section>
           </>
         ) : null}
       </div>

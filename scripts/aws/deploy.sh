@@ -30,7 +30,7 @@ rsync -az --delete \
   --exclude docs \
   --exclude .cursor \
   --exclude .superpowers \
-  --exclude data \
+  --exclude '/data/*.sqlite' \
   --exclude .env \
   -e "$RSYNC_SSH" \
   "$ROOT/" "ec2-user@${INSTANCE_ID}:/opt/sn-analytics/"

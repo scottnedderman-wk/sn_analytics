@@ -23,6 +23,17 @@ export type RegionCount = {
   diff: number | null;
 };
 
+export type AnalysisColumn = { label: string; align: "left" | "right" };
+
+export type AnalysisSection = {
+  title: string;
+  paragraphs: string[];
+  table?: {
+    columns: AnalysisColumn[];
+    rows: Array<{ cells: string[] }>;
+  };
+};
+
 export type EventAnalysis = {
   day: string;
   regions: RegionCount[];
@@ -31,6 +42,8 @@ export type EventAnalysis = {
   aiSampled: number;
   aiMatched: number;
   sentence: string;
+  sections: AnalysisSection[];
+  durationMs?: number;
 };
 
 const REGIONS = [
@@ -75,6 +88,25 @@ WHERE TRY_TO_TIMESTAMP(dimensions:timestamp::VARCHAR)::DATE = ${sqlString(day)}
   AND environment IN ('production','prod-eu','prod-apac')
   AND ${aiIdentitySql(event)}
 GROUP BY 1`;
+}
+
+export function ampTriggerSql(eventName: string, day: string): string {
+  return `SELECT environment::VARCHAR, COALESCE(raw_event_properties:initiated_from::VARCHAR, '(none)'), COUNT(*)
+FROM gold_prod.marts.fct_amplitude_events
+WHERE source_event_type = ${sqlString(eventName)}
+  AND is_amplitude_generated_event = FALSE
+  AND event_date = ${sqlString(day)}
+  AND environment IN ('us','eu','apac')
+GROUP BY 1, 2`;
+}
+
+export function aiTriggerSql(event: MigrationEvent, day: string): string {
+  return `SELECT environment::VARCHAR, COALESCE(dimensions:trigger::VARCHAR, '(none)'), COUNT(*)
+FROM SILVER_PROD.ADMIN.USER_ANALYTIC
+WHERE TRY_TO_TIMESTAMP(dimensions:timestamp::VARCHAR)::DATE = ${sqlString(day)}
+  AND environment IN ('production','prod-eu','prod-apac')
+  AND ${aiIdentitySql(event)}
+GROUP BY 1, 2`;
 }
 
 export function ampMatchSql(eventName: string, day: string, rows: EventSampleSide[]): string | null {
@@ -144,7 +176,14 @@ function sides(rows: string[][]): EventSampleSide[] {
   return rows.map((row) => sampleSideFromRow(row)).filter((side): side is EventSampleSide => side != null);
 }
 
-export function analysisSentence(analysis: Omit<EventAnalysis, "sentence">): string {
+export function analysisSentence(analysis: {
+  day: string;
+  regions: RegionCount[];
+  ampSampled: number;
+  ampMatched: number;
+  aiSampled: number;
+  aiMatched: number;
+}): string {
   const gaps = analysis.regions.map((region) => ({ ...region, gap: Math.abs(region.amp - region.ai) }));
   const total = gaps.reduce((sum, region) => sum + region.gap, 0);
   const top = gaps.reduce<(typeof gaps)[number] | null>((best, region) => (!best || region.gap > best.gap ? region : best), null);
@@ -166,6 +205,143 @@ export function analysisSentence(analysis: Omit<EventAnalysis, "sentence">): str
   return parts.join(" ");
 }
 
+type SplitCount = { environment: string; value: string; count: number };
+
+const AMP_ENVS = ["us", "eu", "apac"] as const;
+
+function countText(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function diffText(amp: number, ai: number): string {
+  const diff = diffPct(amp, ai);
+  return diff == null ? "—" : `${diff}%`;
+}
+
+function splitsOf(rows: string[][]): SplitCount[] {
+  return rows
+    .map((row) => ({
+      environment: row[0] ?? "",
+      value: row[1] ?? "(none)",
+      count: Number.parseFloat(row[2] ?? "0") || 0,
+    }))
+    .filter((row) => row.environment && row.count > 0);
+}
+
+function splitCount(rows: SplitCount[], environment: string, value: string): number {
+  return rows.filter((row) => row.environment === environment && row.value === value).reduce((sum, row) => sum + row.count, 0);
+}
+
+function aiEnvironment(ampEnv: string): string {
+  return Object.entries(AI_TO_AMP).find(([, value]) => value === ampEnv)?.[0] ?? "";
+}
+
+export function triggerSection(ampRows: SplitCount[], aiRows: SplitCount[]): AnalysisSection | null {
+  const values = [...new Set([...ampRows, ...aiRows].map((row) => row.value))].filter((value) => value && value !== "(none)");
+  if (!values.length) return null;
+  const compared = values.flatMap((value) =>
+    AMP_ENVS.map((env) => {
+      const amp = splitCount(ampRows, env, value);
+      const ai = splitCount(aiRows, aiEnvironment(env), value);
+      return { value, env, amp, ai, gap: Math.abs(amp - ai) };
+    }).filter((row) => row.amp > 0 || row.ai > 0),
+  );
+  if (!compared.length) return null;
+
+  const byValue = new Map<string, { amp: number; ai: number; gap: number }>();
+  for (const row of compared) {
+    const current = byValue.get(row.value) ?? { amp: 0, ai: 0, gap: 0 };
+    current.amp += row.amp;
+    current.ai += row.ai;
+    current.gap += row.gap;
+    byValue.set(row.value, current);
+  }
+  const ranked = [...byValue.entries()].sort((a, b) => b[1].gap - a[1].gap);
+  const top = ranked[0];
+  const totalGap = ranked.reduce((sum, [, item]) => sum + item.gap, 0);
+  const paragraphs = [
+    "Splitting both sides by how the event was triggered shows where the volumes diverge. Amplitude records this as initiated_from and App Intel records it as trigger.",
+  ];
+  if (top && totalGap > 0) {
+    const [value, item] = top;
+    const regions = compared
+      .filter((row) => row.value === value && row.gap > 0)
+      .sort((a, b) => b.gap - a.gap)
+      .map((row) => `${row.env} has ${countText(row.amp)} Amplitude and ${countText(row.ai)} App Intel`);
+    const lead =
+      item.gap * 2 >= totalGap
+        ? `${value} accounts for most of the difference`
+        : `The largest difference is ${value} (${countText(item.amp)} Amplitude, ${countText(item.ai)} App Intel)`;
+    paragraphs.push(regions.length ? `${lead}. ${regions.join(". ")}.` : `${lead}.`);
+    const worst = compared.filter((row) => row.value === value).sort((a, b) => b.gap - a.gap)[0];
+    if (worst && worst.amp > 0 && worst.ai >= worst.amp * 2) {
+      paragraphs.push(
+        `In ${worst.env}, App Intel records about ${Math.round(worst.ai / worst.amp)}× as many ${value} events as Amplitude (${countText(worst.amp)} vs ${countText(worst.ai)}).`,
+      );
+    }
+  }
+  const closer = ranked.slice(1);
+  if (closer.length) {
+    paragraphs.push(
+      `Other triggers stay closer. ${closer
+        .map(([value, item]) => `${value} is ${countText(item.amp)} Amplitude and ${countText(item.ai)} App Intel`)
+        .join(". ")}.`,
+    );
+  }
+  return {
+    title: "Trigger",
+    paragraphs,
+    table: {
+      columns: [
+        { label: "Trigger", align: "left" },
+        { label: "Region", align: "left" },
+        { label: "Amplitude", align: "right" },
+        { label: "App Intel", align: "right" },
+        { label: "Diff", align: "right" },
+      ],
+      rows: [...compared]
+        .sort((a, b) => b.gap - a.gap || a.value.localeCompare(b.value))
+        .map((row) => ({ cells: [row.value, row.env, countText(row.amp), countText(row.ai), diffText(row.amp, row.ai)] })),
+    },
+  };
+}
+
+function regionSection(day: string, regions: RegionCount[]): AnalysisSection {
+  const gaps = regions.map((region) => ({ ...region, gap: Math.abs(region.amp - region.ai) }));
+  const total = gaps.reduce((sum, region) => sum + region.gap, 0);
+  const top = gaps.reduce<(typeof gaps)[number] | null>((best, region) => (!best || region.gap > best.gap ? region : best), null);
+  const paragraph =
+    top && total > 0 && top.gap * 2 >= total
+      ? `On ${day}, ${top.ampEnv} accounts for most of the gap (${countText(top.amp)} Amplitude, ${countText(top.ai)} App Intel${top.diff == null ? "" : `, ${top.diff}%`}).`
+      : `On ${day}, the gap is spread across regions.`;
+  return {
+    title: "Regions",
+    paragraphs: [paragraph],
+    table: {
+      columns: [
+        { label: "Region", align: "left" },
+        { label: "Amplitude", align: "right" },
+        { label: "App Intel", align: "right" },
+        { label: "Diff", align: "right" },
+      ],
+      rows: regions.map((region) => ({
+        cells: [`${region.ampEnv} / ${region.aiEnv}`, countText(region.amp), countText(region.ai), region.diff == null ? "—" : `${region.diff}%`],
+      })),
+    },
+  };
+}
+
+function exampleSection(analysis: { ampSampled: number; ampMatched: number; aiSampled: number; aiMatched: number }): AnalysisSection | null {
+  const paragraphs: string[] = [];
+  if (analysis.ampSampled > 0) {
+    paragraphs.push(`${analysis.ampMatched} of ${analysis.ampSampled} Amplitude examples match an App Intel event.`);
+  }
+  if (analysis.aiSampled > 0) {
+    paragraphs.push(`${analysis.aiMatched} of ${analysis.aiSampled} App Intel examples match an Amplitude event.`);
+  }
+  return paragraphs.length ? { title: "Examples", paragraphs } : null;
+}
+
 export function analysisDay(event: MigrationEvent, window: DayWindow, rows: Array<{ source: "amp" | "ai"; day: string; count: number }>): string {
   const series = eventVolumeSeries(window, rows, Boolean(event.aiCategory && event.aiAction));
   return dominantGapDay(series) ?? window.end;
@@ -173,9 +349,11 @@ export function analysisDay(event: MigrationEvent, window: DayWindow, rows: Arra
 
 export async function loadEventAnalysis(event: MigrationEvent, day: string, query: SampleQuery): Promise<EventAnalysis> {
   const window = { start: day, end: day };
-  const [ampRegions, aiRegions] = await Promise.all([
+  const [ampRegions, aiRegions, ampTriggers, aiTriggers] = await Promise.all([
     query(ampRegionSql(event.name, day), "amp"),
     query(aiRegionSql(event, day), "ai"),
+    query(ampTriggerSql(event.name, day), "amp"),
+    query(aiTriggerSql(event, day), "ai"),
   ]);
   const ampCounts = countsOf(ampRegions);
   const aiCounts = countsOf(aiRegions);
@@ -199,5 +377,8 @@ export async function loadEventAnalysis(event: MigrationEvent, day: string, quer
     aiSampled: aiSamples.length,
     aiMatched: countMatched(aiSamples, ampHits, false),
   };
-  return { ...draft, sentence: analysisSentence(draft) };
+  const sections = [regionSection(day, regions), triggerSection(splitsOf(ampTriggers), splitsOf(aiTriggers)), exampleSection(draft)].filter(
+    (section): section is AnalysisSection => section != null,
+  );
+  return { ...draft, sentence: analysisSentence(draft), sections };
 }

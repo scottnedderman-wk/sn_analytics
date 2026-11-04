@@ -1,6 +1,7 @@
 import { serve } from "bun";
 import { compareRoutes } from "@/api/compare";
 import { contributorsRoutes } from "@/api/contributors";
+import { eventCacheRoutes } from "@/api/eventCache";
 import { eventAnalysisRoutes } from "@/api/eventAnalysis";
 import { eventSampleRoutes } from "@/api/eventSample";
 import { eventVolumeRoutes } from "@/api/eventVolume";
@@ -33,6 +34,7 @@ const server = serve({
     ...eventVolumeRoutes(db),
     ...eventSampleRoutes(db),
     ...eventAnalysisRoutes(db),
+    ...eventCacheRoutes(db),
     ...homepageRoutes({ db }),
   },
 
