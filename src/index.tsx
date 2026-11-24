@@ -5,13 +5,17 @@ import { eventCacheRoutes } from "@/api/eventCache";
 import { eventAnalysisRoutes } from "@/api/eventAnalysis";
 import { eventSampleRoutes } from "@/api/eventSample";
 import { eventVolumeRoutes } from "@/api/eventVolume";
+import { healthRoutes } from "@/api/health";
 import { helloRoutes } from "@/api/hello";
 import { homepageRoutes } from "@/api/homepage";
 import { seedJsonUrl } from "@/lib/dataPath";
 import { openAppDatabase, sqlitePathFromEnv } from "@/lib/db";
 import { resumeHomepageRefresh } from "@/lib/homepageJob";
 import { listenPort, SERVE_IDLE_TIMEOUT_SECONDS } from "@/lib/port";
-import index from "./index.html";
+import { distHandler, useDist } from "@/lib/staticDist";
+
+// Production serves the prebuilt, base-path-aware bundle from dist/; dev bundles index.html on the fly.
+const index = useDist() ? distHandler() : (await import("./index.html")).default;
 
 const db = openAppDatabase(sqlitePathFromEnv());
 resumeHomepageRefresh({ db });
@@ -28,6 +32,7 @@ const server = serve({
     // Serve index.html for all unmatched routes.
     "/*": index,
 
+    ...healthRoutes(),
     ...helloRoutes(),
     ...compareRoutes(db),
     ...contributorsRoutes(db),

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { exampleFieldRows, type EventSample } from "@/lib/eventSample";
 import type { MigrationEvent } from "@/lib/model";
 import type { DayWindow } from "@/lib/volumeWindow";
+import { withBase } from "@/lib/basePath";
 
 function sampleCaption(sample: EventSample): string {
   if (sample.paired) return "Same event in Amplitude and App Intel.";
@@ -88,7 +89,7 @@ export function EventExampleModal({
     setSample(null);
     setError(null);
     const params = new URLSearchParams({ start: applied.start, end: applied.end });
-    fetch(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/sample?${params}`)
+    fetch(withBase(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/sample?${params}`))
       .then(async (res) => {
         const body = (await res.json()) as EventSample & { error?: string };
         if (!res.ok) throw new Error(body.error ?? res.statusText);

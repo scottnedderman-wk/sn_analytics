@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { HomepageJob } from "@/lib/homepageJob";
 import type { DashboardData } from "@/lib/model";
 import { canApplyWindow, DEFAULT_VOLUME_WINDOW, type DayWindow } from "@/lib/volumeWindow";
+import { withBase } from "@/lib/basePath";
 
 export const DIFF_TOLERANCES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 export const DEFAULT_DIFF_TOLERANCE = 5;
@@ -26,7 +27,7 @@ function jobToken(job: HomepageJob): string {
 }
 
 async function fetchJob(): Promise<HomepageJob> {
-  const res = await fetch("/api/homepage/job");
+  const res = await fetch(withBase("/api/homepage/job"));
   const body = (await res.json()) as { job?: HomepageJob; error?: string };
   if (!res.ok || !body.job) throw new Error(body.error ?? res.statusText);
   return body.job;
@@ -34,7 +35,7 @@ async function fetchJob(): Promise<HomepageJob> {
 
 async function fetchVolumes(window: DayWindow): Promise<DashboardData> {
   const params = new URLSearchParams({ start: window.start, end: window.end });
-  const res = await fetch(`/api/homepage/volumes?${params}`);
+  const res = await fetch(withBase(`/api/homepage/volumes?${params}`));
   const body = (await res.json()) as { data?: DashboardData; error?: string };
   if (!res.ok || !body.data) throw new Error(body.error ?? res.statusText);
   return body.data;
@@ -116,7 +117,7 @@ export function VolumeWindowProvider({
     if (busy) return;
     setError(null);
     try {
-      const res = await fetch("/api/homepage/refresh", {
+      const res = await fetch(withBase("/api/homepage/refresh"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(window),

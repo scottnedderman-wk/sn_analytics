@@ -1,5 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from "react-router";
+import { BASE_PATH, withBase } from "@/lib/basePath";
 import { NotFound } from "@/components/ui";
 import { parseRoute, type DashboardData } from "@/lib/model";
 import { hydrateSeed, type SeedData } from "@/lib/seed";
@@ -105,7 +106,7 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/seed.json")
+    fetch(withBase("/seed.json"))
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load seed.json (${res.status})`);
         return res.json() as Promise<SeedData>;
@@ -143,7 +144,7 @@ export function App() {
   const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={BASE_PATH}>
       <div className="font-sans text-[13px] leading-relaxed">
         <div className="max-w-[1180px] mx-auto px-5 pb-24">
           <AppShell

@@ -3,6 +3,7 @@ import type { AnalysisSection, EventAnalysis } from "@/lib/eventAnalysis";
 import { DIFF_INK, diffTone } from "@/routes/dashboard/AppSummary";
 import type { MigrationEvent } from "@/lib/model";
 import type { DayWindow } from "@/lib/volumeWindow";
+import { withBase } from "@/lib/basePath";
 
 function cellInk(text: string, tolerance: number): string | undefined {
   const match = /^(-?\d+)%$/.exec(text);
@@ -142,7 +143,7 @@ export function EventAnalysisModal({
     setAnalysis(null);
     setError(null);
     const params = new URLSearchParams({ start: applied.start, end: applied.end });
-    fetch(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/analysis?${params}`)
+    fetch(withBase(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/analysis?${params}`))
       .then(async (res) => {
         const body = (await res.json()) as EventAnalysis & { error?: string };
         if (!res.ok) throw new Error(body.error ?? res.statusText);

@@ -27,6 +27,7 @@ import { AnalyzeIcon, Badge, ExampleIcon, Highlight, InternalLink, MagnifyIcon, 
 import { EventAnalysisModal } from "./EventAnalysisModal";
 import { EventCompareModal } from "./EventCompareModal";
 import { EventExampleModal } from "./EventExampleModal";
+import { withBase } from "@/lib/basePath";
 
 export function GitHubLine({
   repo,
@@ -322,7 +323,7 @@ export function AppDetail({
     }
     let cancelled = false;
     const params = new URLSearchParams({ start: applied.start, end: applied.end });
-    fetch(`/api/repos/${encodeURIComponent(r.repo)}/volume?${params}`)
+    fetch(withBase(`/api/repos/${encodeURIComponent(r.repo)}/volume?${params}`))
       .then((res) => res.json() as Promise<{ rows?: Array<{ eventName: string; source: "amp" | "ai"; day: string; count: number }> }>)
       .then((body) => {
         if (!cancelled) setDaily(body.rows ?? []);
@@ -341,7 +342,7 @@ export function AppDetail({
     }
     let cancelled = false;
     const params = new URLSearchParams({ start: applied.start, end: applied.end });
-    fetch(`/api/repos/${encodeURIComponent(r.repo)}/cached-events?${params}`)
+    fetch(withBase(`/api/repos/${encodeURIComponent(r.repo)}/cached-events?${params}`))
       .then((res) => res.json() as Promise<{ analyses?: string[]; examples?: string[] }>)
       .then((body) => {
         if (cancelled) return;
@@ -383,7 +384,7 @@ export function AppDetail({
   useEffect(() => {
     setContributors([]);
     let cancelled = false;
-    fetch(`/api/repos/${encodeURIComponent(r.repo)}/contributors`)
+    fetch(withBase(`/api/repos/${encodeURIComponent(r.repo)}/contributors`))
       .then((res) => res.json() as Promise<{ contributors?: RepoContributor[] }>)
       .then((body) => {
         if (!cancelled) setContributors(body.contributors ?? []);

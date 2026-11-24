@@ -1,0 +1,38 @@
+version: 2
+services:
+  sn-analytics:
+    # Built from ./Dockerfile via `wk build`
+    replicas: 1 # SQLite is a single-writer file; do not scale out
+    ports:
+      - name: http
+        from: 3000
+        to: 3000
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      SQLITE_PATH: /data/app.sqlite
+    # Values live in Vault (`wk secret put environment.<NAME>=<value>`) and arrive as env vars at runtime
+    secrets:
+      SNOWFLAKE_PAT: ''
+      AMPLITUDE_API_KEY: ''
+      AMPLITUDE_SECRET_KEY: ''
+    ingress:
+      rules:
+        # No trailing slash: the chart appends ($|/(.*)) to build the rewrite regex
+        - path: "/s/sn-analytics"
+          subDomain: h
+          port: 3000
+    resources:
+      requests:
+        cpu: "0.25"
+        memory: "256Mi"
+      limits:
+        cpu: "1.0"
+        memory: "512Mi"
+meta:
+  repo: sn_analytics
+  tags:
+    service_name: sn-analytics
+    team: client-platform # required
+    organization: frameworks # required
+    taxonomy_component: sn-analytics # required

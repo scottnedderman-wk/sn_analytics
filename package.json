@@ -9,7 +9,8 @@
     "build": "bun run build.ts",
     "snowflake-events": "bun scripts/snowflake-events.ts",
     "amplitude-refresh-30d": "bun scripts/amplitude-refresh-30d.ts",
-    "repo-contributors": "bun scripts/repo-contributors.ts"
+    "repo-contributors": "bun scripts/repo-contributors.ts",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "bun-plugin-tailwind": "^0.0.15",

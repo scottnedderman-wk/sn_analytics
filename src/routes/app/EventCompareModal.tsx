@@ -3,6 +3,7 @@ import { DIFF_INK, ampAiDiffPct, diffTone } from "@/routes/dashboard/AppSummary"
 import { eventVolumeSeries, type EventDayVolume } from "@/lib/eventVolumeCache";
 import type { MigrationEvent } from "@/lib/model";
 import type { DayWindow } from "@/lib/volumeWindow";
+import { withBase } from "@/lib/basePath";
 
 function countText(n: number | null): string {
   return n == null ? "—" : n.toLocaleString("en-US");
@@ -63,7 +64,7 @@ export function EventCompareModal({
     setLoaded(null);
     setError(null);
     const params = new URLSearchParams({ start: applied.start, end: applied.end });
-    fetch(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/volume?${params}`)
+    fetch(withBase(`/api/repos/${encodeURIComponent(repo)}/events/${encodeURIComponent(event.name)}/volume?${params}`))
       .then(async (res) => {
         const body = (await res.json()) as { rows?: Array<{ source: "amp" | "ai"; day: string; count: number }>; error?: string };
         if (!res.ok) throw new Error(body.error ?? res.statusText);
